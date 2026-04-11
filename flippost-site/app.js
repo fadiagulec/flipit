@@ -13,13 +13,13 @@ const platformPatterns = {
 };
 
 const platformEmojis = {
-    instagram: 'ð·',
-    tiktok: 'ðµ',
-    youtube: 'â¶ï¸',
-    linkedin: 'ð¼',
-    facebook: 'ð¥',
-    x: 'ð',
-    threads: 'ð§µ'
+    instagram: '\u{1F4F7}',
+    tiktok: '\u{1F3B5}',
+    youtube: '\u25B6\uFE0F',
+    linkedin: '\u{1F4BC}',
+    facebook: '\u{1F4F5}',
+    x: '\u{1F426}',
+    threads: '\u{1F9F5}'
 };
 
 // Initialize tab navigation
@@ -79,8 +79,224 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ââ DOWNLOAD ââââââââââââââââââââââââââââââââââââââââââââââ
+// ── DOWNLOAD ─────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
+
+// CORS proxies tried in order. corsproxy.io is the most reliable free public
+// proxy; allorigins is a backup. Both are free and require no auth.
+const CORS_PROXIES = [
+    (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)
+];
+
+async function fetchJsonWithProxy(targetUrl) {
+    let lastErr;
+    for (const buildProxy of CORS_PROXIES) {
+        try {
+            const res = await fetch(buildProxy(targetUrl), {
+                signal: AbortSignal.timeout(15000)
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return await res.json();
+        } catch (e) {
+            lastErr = e;
+        }
+    }
+    throw lastErr || new Error('All proxies failed');
+}
+
+// Pull the Instagram shortcode out of any reel/p/tv URL
+function extractInstagramShortcode(url) {
+    const m = url.match(/instagram\.com\/(?:reel|p|tv|reels)\/([A-Za-z0-9_-]+)/i);
+    return m ? m[1] : null;
+}
+
+async function downloadInstagram(url) {
+    // Strategy 1: instavideosave.com — free public API, returns direct media URLs.
+    try {
+        const apiUrl = 'https://api.instavideosave.com/allinone?url=' + encodeURIComponent(url);
+        const data = await fetchJsonWithProxy(apiUrl);
+        const mediaList = collectInstaMedia(data);
+        if (mediaList.length > 0) {
+            await downloadAllMedia(mediaList, 'instagram');
+            return true;
+        }
+    } catch (e) {
+        console.warn('instavideosave failed:', e.message);
+    }
+
+    // Strategy 2: Instagram public GraphQL endpoint via CORS proxy.
+    try {
+        const shortcode = extractInstagramShortcode(url);
+        if (shortcode) {
+            const igUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
+            const data = await fetchJsonWithProxy(igUrl);
+            const mediaList = collectInstaMediaFromGraphql(data);
+            if (mediaList.length > 0) {
+                await downloadAllMedia(mediaList, 'instagram');
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('Instagram GraphQL failed:', e.message);
+    }
+
+    return false;
+}
+
+function collectInstaMedia(data) {
+    // instavideosave.com response shapes vary; handle the common ones.
+    const out = [];
+    if (!data) return out;
+
+    if (typeof data.video_url === 'string') {
+        out.push({ url: data.video_url, type: 'video' });
+    }
+    if (typeof data.url === 'string' && /\.(mp4|jpg|jpeg|png)/i.test(data.url)) {
+        out.push({ url: data.url, type: /\.mp4/i.test(data.url) ? 'video' : 'image' });
+    }
+    if (Array.isArray(data.media)) {
+        data.media.forEach(m => {
+            if (m && m.url) {
+                out.push({
+                    url: m.url,
+                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
+                });
+            }
+        });
+    }
+    if (Array.isArray(data.data)) {
+        data.data.forEach(m => {
+            if (m && m.url) {
+                out.push({
+                    url: m.url,
+                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
+                });
+            }
+        });
+    }
+    if (Array.isArray(data.links)) {
+        data.links.forEach(m => {
+            if (typeof m === 'string') {
+                out.push({ url: m, type: /\.mp4/i.test(m) ? 'video' : 'image' });
+            } else if (m && m.url) {
+                out.push({
+                    url: m.url,
+                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
+                });
+            }
+        });
+    }
+    return out;
+}
+
+function collectInstaMediaFromGraphql(data) {
+    const out = [];
+    const item = data && (
+        (data.items && data.items[0]) ||
+        (data.graphql && data.graphql.shortcode_media)
+    );
+    if (!item) return out;
+
+    // Carousel (private API style)
+    if (Array.isArray(item.carousel_media)) {
+        item.carousel_media.forEach(c => {
+            const v = c.video_versions && c.video_versions[0] && c.video_versions[0].url;
+            const i = c.image_versions2 &&
+                c.image_versions2.candidates &&
+                c.image_versions2.candidates[0] &&
+                c.image_versions2.candidates[0].url;
+            if (v) out.push({ url: v, type: 'video' });
+            else if (i) out.push({ url: i, type: 'image' });
+        });
+    }
+
+    // Carousel (graphql style)
+    if (item.edge_sidecar_to_children && Array.isArray(item.edge_sidecar_to_children.edges)) {
+        item.edge_sidecar_to_children.edges.forEach(({ node }) => {
+            if (node.is_video && node.video_url) out.push({ url: node.video_url, type: 'video' });
+            else if (node.display_url) out.push({ url: node.display_url, type: 'image' });
+        });
+    }
+
+    if (out.length === 0) {
+        // Single video
+        const v = (item.video_versions && item.video_versions[0] && item.video_versions[0].url) ||
+                  (item.is_video ? item.video_url : null);
+        if (v) {
+            out.push({ url: v, type: 'video' });
+        } else {
+            // Single image
+            const i = (item.image_versions2 &&
+                       item.image_versions2.candidates &&
+                       item.image_versions2.candidates[0] &&
+                       item.image_versions2.candidates[0].url) ||
+                      item.display_url;
+            if (i) out.push({ url: i, type: 'image' });
+        }
+    }
+
+    return out;
+}
+
+async function downloadTiktok(url) {
+    // tikwm.com — free public API, returns direct watermark-free MP4 URLs.
+    try {
+        const apiUrl = 'https://www.tikwm.com/api/?url=' + encodeURIComponent(url) + '&hd=1';
+        const data = await fetchJsonWithProxy(apiUrl);
+        if (data && data.data) {
+            const mediaList = [];
+            if (data.data.play) mediaList.push({ url: data.data.play, type: 'video' });
+            else if (data.data.wmplay) mediaList.push({ url: data.data.wmplay, type: 'video' });
+            if (mediaList.length > 0) {
+                await downloadAllMedia(mediaList, 'tiktok');
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('tikwm failed:', e.message);
+    }
+    return false;
+}
+
+async function downloadAllMedia(mediaList, platform) {
+    for (let i = 0; i < mediaList.length; i++) {
+        const m = mediaList[i];
+        const ext = m.type === 'video' ? 'mp4' : 'jpg';
+        const filename = mediaList.length > 1
+            ? `${platform}-${i + 1}.${ext}`
+            : `${platform}.${ext}`;
+        await downloadFromUrl(m.url, filename);
+    }
+}
+
+async function downloadFromUrl(mediaUrl, filename) {
+    // Fetch through CORS proxy so the browser will give us a Blob we can save.
+    let lastErr;
+    for (const buildProxy of CORS_PROXIES) {
+        try {
+            const res = await fetch(buildProxy(mediaUrl), {
+                signal: AbortSignal.timeout(30000)
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const blob = await res.blob();
+            const objUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+            return;
+        } catch (e) {
+            lastErr = e;
+        }
+    }
+    // Last resort: just open the raw URL in a new tab so the user can save manually.
+    window.open(mediaUrl, '_blank');
+    throw lastErr || new Error('Could not fetch media');
+}
 
 async function handleDownload() {
     const url = document.getElementById('urlInput').value.trim();
@@ -92,41 +308,50 @@ async function handleDownload() {
     const btn = document.getElementById('downloadBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Downloading...';
+    btn.textContent = '\u23F3 Downloading...';
 
     try {
-        // First try the backend
-        let backendSucceeded = false;
-        try {
-            const res = await fetch(`${BACKEND_URL}/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
-                signal: AbortSignal.timeout(10000)
-            });
+        let succeeded = false;
 
-            if (res.ok) {
-                const result = await res.json();
-                if (result.items && Array.isArray(result.items)) {
-                    result.items.forEach((item, idx) => triggerDownload(item, `${platform}-item-${idx}`));
-                    backendSucceeded = true;
-                } else if (result.video) {
-                    downloadBase64(result.video, `${platform}-video.mp4`, 'video/mp4');
-                    backendSucceeded = true;
-                } else if (result.image) {
-                    downloadBase64(result.image, `${platform}-image.jpg`, 'image/jpeg');
-                    backendSucceeded = true;
-                }
-            }
-        } catch (backendErr) {
-            // Backend unavailable or returned no content, fall through to helper
-            console.warn('Backend download failed:', backendErr.message);
+        // Strategy 1: client-side public APIs (no backend needed)
+        if (platform === 'instagram') {
+            succeeded = await downloadInstagram(url);
+        } else if (platform === 'tiktok') {
+            succeeded = await downloadTiktok(url);
         }
 
-        if (backendSucceeded) {
-            showSuccess('✅ Download started!', 'errorMessage');
+        // Strategy 2: legacy Railway backend (kept for completeness, may be down)
+        if (!succeeded) {
+            try {
+                const res = await fetch(`${BACKEND_URL}/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }),
+                    signal: AbortSignal.timeout(8000)
+                });
+                if (res.ok) {
+                    const result = await res.json();
+                    if (result.items && Array.isArray(result.items)) {
+                        result.items.forEach((item, idx) =>
+                            triggerDownload(item, `${platform}-item-${idx}`));
+                        succeeded = true;
+                    } else if (result.video) {
+                        downloadBase64(result.video, `${platform}-video.mp4`, 'video/mp4');
+                        succeeded = true;
+                    } else if (result.image) {
+                        downloadBase64(result.image, `${platform}-image.jpg`, 'image/jpeg');
+                        succeeded = true;
+                    }
+                }
+            } catch (backendErr) {
+                console.warn('Backend download failed:', backendErr.message);
+            }
+        }
+
+        if (succeeded) {
+            showSuccess('\u2705 Download started!', 'errorMessage');
         } else {
-            // Fallback: open a free download helper in a new tab
+            // Strategy 3 (last resort): open a free download helper site in a new tab.
             const encodedUrl = encodeURIComponent(url);
             let helperUrl;
             if (platform === 'instagram') {
@@ -141,7 +366,7 @@ async function handleDownload() {
                 helperUrl = 'https://snapinsta.app/?url=' + encodedUrl;
             }
             window.open(helperUrl, '_blank');
-            showSuccess('🔗 Opening download helper...', 'errorMessage');
+            showSuccess('\u{1F517} Opening download helper...', 'errorMessage');
         }
     } catch (err) {
         showError(`Download error: ${err.message}`, 'errorMessage');
@@ -169,7 +394,7 @@ function downloadBase64(base64Data, filename, mimeType = 'application/octet-stre
     } catch (e) { console.error('Download error:', e); }
 }
 
-// ââ EXTRACT & FLIP âââââââââââââââââââââââââââââââââââââââââ
+// ── EXTRACT & FLIP ───────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -182,10 +407,10 @@ async function handleExtractAndTwist() {
     const btn = document.getElementById('extractBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'â³ Extracting & Flipping...';
+    btn.textContent = '\u23F3 Extracting & Flipping...';
 
     const container = document.getElementById('resultsContainer');
-    container.innerHTML = '<div class="loading">ð Processing your content, please wait...</div>';
+    container.innerHTML = '<div class="loading">\u{1F504} Processing your content, please wait...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
@@ -215,7 +440,7 @@ function displayResults(data, platform) {
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');
         wrap.className = 'carousel-preview';
-        wrap.innerHTML = '<h3>ð¸ Carousel Images</h3>';
+        wrap.innerHTML = '<h3>\u{1F5BC} Carousel Images</h3>';
         data.carousel_images.forEach((img, i) => {
             const div = document.createElement('div');
             div.className = 'carousel-image-wrapper';
@@ -231,8 +456,13 @@ function displayResults(data, platform) {
     const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
 
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
-    appendSection(container, 'â¨ Flipped Version', data.twisted, true);
-    if (data.prompt) appendSection(container, 'ð¯ Proven Hook', data.prompt, true);
+    appendSection(container, '\u2728 Flipped Version', data.twisted, true);
+    if (data.prompt) appendSection(container, '\u{1F3AF} Proven Hook', data.prompt, true);
+
+    // New: video creation prompt for AI video tools
+    if (data.twisted) {
+        appendVideoPromptSection(container, data.twisted, platform);
+    }
 }
 
 function appendSection(container, title, text, copyable) {
@@ -242,14 +472,90 @@ function appendSection(container, title, text, copyable) {
     if (copyable) {
         const btn = document.createElement('button');
         btn.className = 'copy-btn';
-        btn.textContent = 'ð Copy';
+        btn.textContent = '\u{1F4CB} Copy';
         btn.onclick = () => copyToClipboard(btn);
         div.appendChild(btn);
     }
     container.appendChild(div);
 }
 
-// ââ SCRIPT REWRITE âââââââââââââââââââââââââââââââââââââââââ
+// ── VIDEO CREATION PROMPT ────────────────────────────────
+// Build a ready-to-paste prompt for AI video tools (Runway, Pika, Kling, Sora, etc.)
+// based on the flipped script content.
+function buildVideoPrompt(flippedScript, platform) {
+    const script = (flippedScript || '').trim();
+
+    // Take the first sentence as the hook seed.
+    const firstSentence = (script.split(/(?<=[.!?])\s+/)[0] || script).slice(0, 160);
+
+    // Heuristic style picks based on the script content.
+    const lower = script.toLowerCase();
+    let style;
+    if (/story|happened|i was|when i|last week|yesterday/.test(lower)) {
+        style = 'Cinematic talking-head with dynamic b-roll cutaways. Shallow depth of field, warm tones, handheld energy.';
+    } else if (/tip|step|how to|here.s how|hack|secret/.test(lower)) {
+        style = 'Fast-cut tutorial style. Clean overhead and over-the-shoulder shots, on-screen text overlays, modern minimal aesthetic.';
+    } else if (/data|study|number|research|stats|%/.test(lower)) {
+        style = 'Data-driven motion graphics mixed with sleek b-roll. Cool color palette, kinetic typography, documentary feel.';
+    } else {
+        style = 'Cinematic vertical 9:16 with high-contrast lighting. Mix of talking-head and b-roll, modern Reel/TikTok pacing.';
+    }
+
+    // Pick a sensible scene description.
+    const scene = `A creator delivers the message below in a visually engaging vertical 9:16 format optimised for ${platform || 'social media'}. Camera moves with subtle motion, environment matches the topic, and supporting b-roll reinforces every key beat.`;
+
+    // Hook: dramatic opening visual.
+    const hook = `Open on an arresting visual that physicalises this line: "${firstSentence}". Use a fast push-in or whip-pan, big bold on-screen text, and a sound design hit on frame 1 to stop the scroll.`;
+
+    // CTA visual.
+    const cta = `End on the creator looking straight into camera with bold animated text: "Follow for more" plus a thumb-stopping freeze frame. Hold 1.5s for the loop.`;
+
+    return [
+        `[SCENE]: ${scene}`,
+        ``,
+        `[HOOK]: ${hook}`,
+        ``,
+        `[STYLE]: ${style}`,
+        ``,
+        `[VOICEOVER]: ${script}`,
+        ``,
+        `[CTA]: ${cta}`,
+        ``,
+        `Aspect ratio: 9:16. Duration: 15-45 seconds. Pacing: fast cuts every 1-2 seconds. Audio: trending upbeat bed + clear VO mix. Subtitles: burned-in, large, high-contrast.`
+    ].join('\n');
+}
+
+function appendVideoPromptSection(container, flippedScript, platform) {
+    const promptText = buildVideoPrompt(flippedScript, platform);
+
+    const div = document.createElement('div');
+    div.className = 'result-section';
+
+    const heading = document.createElement('h3');
+    heading.textContent = '\u{1F3AC} Video Creation Prompt';
+    div.appendChild(heading);
+
+    const sub = document.createElement('p');
+    sub.style.cssText = 'color:#888;font-size:12px;margin-bottom:10px;text-transform:none;letter-spacing:0;';
+    sub.textContent = 'Paste this into Runway, Pika Labs, Kling, Sora, or any AI video tool.';
+    div.appendChild(sub);
+
+    const textEl = document.createElement('p');
+    textEl.className = 'result-text';
+    textEl.textContent = promptText;
+    div.appendChild(textEl);
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-primary copy-btn';
+    btn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;flex:none;';
+    btn.textContent = '\u{1F4CB} Copy Video Prompt';
+    btn.onclick = () => copyToClipboard(btn);
+    div.appendChild(btn);
+
+    container.appendChild(div);
+}
+
+// ── SCRIPT REWRITE ───────────────────────────────────────
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -259,10 +565,10 @@ async function handleRewriteScript() {
     const btn = document.getElementById('rewriteBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'â³ Rewriting...';
+    btn.textContent = '\u23F3 Rewriting...';
 
     const container = document.getElementById('scriptResultsContainer');
-    container.innerHTML = '<div class="loading">â¨ Creating your flipped version...</div>';
+    container.innerHTML = '<div class="loading">\u2728 Creating your flipped version...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -276,8 +582,13 @@ async function handleRewriteScript() {
         const data = await res.json();
         container.innerHTML = '';
         appendSection(container, 'Original Script', script, false);
-        appendSection(container, 'â¨ Flipped Version', data.twisted, true);
-        if (data.prompt) appendSection(container, 'ð¯ Proven Hook', data.prompt, true);
+        appendSection(container, '\u2728 Flipped Version', data.twisted, true);
+        if (data.prompt) appendSection(container, '\u{1F3AF} Proven Hook', data.prompt, true);
+
+        // New: video creation prompt for AI video tools
+        if (data.twisted) {
+            appendVideoPromptSection(container, data.twisted, null);
+        }
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
         container.innerHTML = '';
@@ -287,7 +598,7 @@ async function handleRewriteScript() {
     }
 }
 
-// ââ NICHE IDEAS âââââââââââââââââââââââââââââââââââââââââââââ
+// ── NICHE IDEAS ──────────────────────────────────────────
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -298,10 +609,10 @@ async function handleGenerateIdeas() {
     const btn = document.getElementById('generateIdeasBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'â³ Generating...';
+    btn.textContent = '\u23F3 Generating...';
 
     const container = document.getElementById('ideasResultsContainer');
-    container.innerHTML = '<div class="loading">ð Creating viral script ideas...</div>';
+    container.innerHTML = '<div class="loading">\u{1F680} Creating viral script ideas...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -314,8 +625,8 @@ async function handleGenerateIdeas() {
 
         const data = await res.json();
         container.innerHTML = '';
-        appendSection(container, 'ð¡ Your 3 Viral Script Ideas', data.twisted, true);
-        if (data.prompt) appendSection(container, 'ð¯ Pro Tips', data.prompt, true);
+        appendSection(container, '\u{1F4A1} Your 3 Viral Script Ideas', data.twisted, true);
+        if (data.prompt) appendSection(container, '\u{1F3AF} Pro Tips', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'ideasErrorMessage');
         container.innerHTML = '';
@@ -325,12 +636,16 @@ async function handleGenerateIdeas() {
     }
 }
 
-// ââ UTILITIES âââââââââââââââââââââââââââââââââââââââââââââââ
+// ── UTILITIES ────────────────────────────────────────────
 function copyToClipboard(button) {
-    const text = button.previousElementSibling.textContent;
+    // Find the result-text element within the same parent (works regardless
+    // of where the copy button is positioned within the section).
+    const parent = button.parentElement;
+    const target = parent.querySelector('.result-text') || button.previousElementSibling;
+    const text = target ? target.textContent : '';
     navigator.clipboard.writeText(text).then(() => {
         const orig = button.textContent;
-        button.textContent = 'â Copied!';
+        button.textContent = '\u2705 Copied!';
         setTimeout(() => { button.textContent = orig; }, 2000);
     });
 }
