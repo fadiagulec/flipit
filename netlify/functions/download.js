@@ -1,25 +1,40 @@
-const https = require('https');
-const http = require('http');
+// Netlify function proxying the Railway backend's /download endpoint.
+// The Railway service extracts the direct video via yt-dlp and returns it as
+// base64 in `videoData`. We forward that payload unchanged so the browser can
+// materialize the file locally without redirecting to a third-party site.
 
-function httpGet(url) {
+const https = require('https');
+
+const RAILWAY_BACKEND = 'https://web-production-8afc3.up.railway.app';
+
+function postJson(targetUrl, payload, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http;
-    const req = client.get(url, {
+    const body = Buffer.from(JSON.stringify(payload));
+    const u = new URL(targetUrl);
+    const req = https.request({
+      method: 'POST',
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Content-Type': 'application/json',
+        'Content-Length': body.length,
         'Accept': 'application/json'
       },
-      timeout: 10000
+      timeout: timeoutMs
     }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
-        catch(e) { resolve({ status: res.statusCode, data: {} }); }
+        const raw = Buffer.concat(chunks).toString('utf8');
+        try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
+        catch (e) { resolve({ status: res.statusCode, data: null, raw }); }
       });
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(body);
+    req.end();
   });
 }
 
@@ -30,36 +45,42 @@ exports.handler = async (event) => {
     'Content-Type': 'application/json'
   };
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
 
   try {
     const { url } = JSON.parse(event.body || '{}');
-    if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL required' }) };
-
-    // Try instavideosave API (works for Instagram, no auth needed)
-    if (url.includes('instagram.com')) {
-      try {
-        const apiUrl = `https://api.instavideosave.com/allinone?url=${encodeURIComponent(url)}`;
-        const result = await httpGet(apiUrl);
-        if (result.data && result.data.media && result.data.media.length > 0) {
-          const media = result.data.media;
-          if (media.length === 1) {
-            return { statusCode: 200, headers, body: JSON.stringify({ status: 'redirect', url: media[0].url }) };
-          } else {
-            return { statusCode: 200, headers, body: JSON.stringify({
-              status: 'picker',
-              picker: media.map(m => ({ url: m.url, type: m.type || 'video' }))
-            })};
-          }
-        }
-      } catch(e) {
-        console.log('instavideosave failed:', e.message);
-      }
+    if (!url) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL required' }) };
     }
 
-    // Return fallback signal so client opens a helper
-    return { statusCode: 200, headers, body: JSON.stringify({ status: 'use-helper', url }) };
+    // Proxy straight through to Railway. It handles Instagram, TikTok, YT, etc.
+    const result = await postJson(`${RAILWAY_BACKEND}/download`, { url });
 
+    if (result.status === 200 && result.data && result.data.success && result.data.videoData) {
+      // Netlify functions have a ~6MB response cap. Forward only if payload
+      // fits; otherwise signal the client to call Railway directly.
+      const bodyStr = JSON.stringify(result.data);
+      if (Buffer.byteLength(bodyStr, 'utf8') < 5_500_000) {
+        return { statusCode: 200, headers, body: bodyStr };
+      }
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ status: 'too-large', backend: `${RAILWAY_BACKEND}/download` })
+      };
+    }
+
+    if (result.data) {
+      return { statusCode: 200, headers, body: JSON.stringify(result.data) };
+    }
+
+    return {
+      statusCode: 502,
+      headers,
+      body: JSON.stringify({ error: 'backend-no-data', upstream: result.status })
+    };
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }

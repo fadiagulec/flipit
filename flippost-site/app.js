@@ -129,32 +129,46 @@ async function handleDownload() {
     const helperUrl = helpers[platform] || `https://savefrom.net/#url=${encodeURIComponent(url)}`;
 
     try {
-        const resp = await fetch('/.netlify/functions/download', {
+        // Primary path: call the Railway backend directly. It returns the full
+        // video as base64 in `videoData`, so we never redirect the user off-site.
+        const resp = await fetch(`${BACKEND_URL}/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
+
+        if (!resp.ok) throw new Error(`backend ${resp.status}`);
         const data = await resp.json();
 
-        if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+        if (data && data.success && data.videoData) {
+            const ext = (data.ext || '.mp4').replace(/^\.?/, '.');
+            const mime = ext === '.mp4' ? 'video/mp4' :
+                         ext === '.webm' ? 'video/webm' :
+                         ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+                         ext === '.png' ? 'image/png' : 'application/octet-stream';
+            downloadBase64(data.videoData, `flipit-${platform || 'media'}${ext}`, mime);
+            showSuccess('\u2705 Download started!', 'errorMessage');
+        } else if (data && data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
+            data.picker.forEach((item, i) => setTimeout(() => {
+                if (item.videoData) {
+                    downloadBase64(item.videoData, `flipit-${i + 1}.mp4`, 'video/mp4');
+                } else if (item.url) {
+                    const a = document.createElement('a');
+                    a.href = item.url; a.target = '_blank'; a.download = `flipit-${i + 1}`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                }
+            }, i * 700));
+            showSuccess(`\u2705 Downloading ${data.picker.length} files!`, 'errorMessage');
+        } else if (data && (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') && data.url) {
             const a = document.createElement('a');
             a.href = data.url; a.target = '_blank'; a.download = 'flipit-media';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             showSuccess('\u2705 Download started!', 'errorMessage');
-        } else if (data.status === 'picker' && data.picker && data.picker.length > 0) {
-            data.picker.forEach((item, i) => setTimeout(() => {
-                const a = document.createElement('a');
-                a.href = item.url; a.target = '_blank'; a.download = `flipit-${i + 1}`;
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            }, i * 700));
-            showSuccess(`\u2705 Downloading ${data.picker.length} files!`, 'errorMessage');
         } else {
-            // use-helper or any unexpected response — open helper and copy URL
-            window.open(helperUrl, '_blank');
-            try { await navigator.clipboard.writeText(url); } catch(e) {}
-            showSuccess('\u{1F4CB} URL copied! Paste it on the download page that just opened.', 'errorMessage');
+            throw new Error('no-video-data');
         }
     } catch(e) {
+        console.error('download failed:', e);
         window.open(helperUrl, '_blank');
         try { await navigator.clipboard.writeText(url); } catch(e2) {}
         showSuccess('\u{1F4CB} URL copied! Paste it on the download page that just opened.', 'errorMessage');
