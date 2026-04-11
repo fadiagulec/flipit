@@ -110,73 +110,67 @@ function openSnapinstaFallback(url) {
 
 async function handleDownload() {
     const url = document.getElementById('urlInput').value.trim();
-    if (!url) { showError('Please enter a URL', 'errorMessage'); return; }
-
-    const platform = detectPlatform(url);
-    if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
+    if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
 
     const btn = document.getElementById('downloadBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '\u23F3 Downloading...';
+    btn.textContent = '\u23F3 DOWNLOADING...';
 
+    // Try cobalt.tools API (may have CORS issues from the browser).
     try {
-        // Call the cobalt.tools API for the direct media URL.
-        const res = await fetch(COBALT_API, {
+        const resp = await fetch(COBALT_API, {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ url }),
-            signal: AbortSignal.timeout(20000)
+            body: JSON.stringify({ url, vQuality: 'max', filenamePattern: 'basic' })
         });
 
-        if (!res.ok) {
-            throw new Error('cobalt.tools HTTP ' + res.status);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+                window.open(data.url, '_blank');
+                showSuccess('\u2705 Download started!', 'errorMessage');
+                btn.disabled = false;
+                btn.textContent = orig;
+                return;
+            }
+            if (data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
+                data.picker.forEach((item, i) => {
+                    setTimeout(() => window.open(item.url, '_blank'), i * 500);
+                });
+                showSuccess(`\u2705 Opening ${data.picker.length} files...`, 'errorMessage');
+                btn.disabled = false;
+                btn.textContent = orig;
+                return;
+            }
         }
-
-        const data = await res.json();
-        const status = data && data.status;
-
-        if ((status === 'redirect' || status === 'stream' || status === 'tunnel') && data.url) {
-            // Single media item — download directly.
-            const ext = /\.(mp4|mov|webm)(\?|$)/i.test(data.url) ? 'mp4' : 'media';
-            triggerAnchorDownload(data.url, `${platform}.${ext}`);
-            showSuccess('\u2705 Download started!', 'errorMessage');
-        } else if (status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
-            // Carousel/multiple items — cobalt returns a picker array. Download all.
-            data.picker.forEach((item, idx) => {
-                const mediaUrl = item && (item.url || item.thumb);
-                if (mediaUrl) {
-                    const type = item.type || '';
-                    const ext = type === 'video' ? 'mp4' : 'jpg';
-                    const filename = data.picker.length > 1
-                        ? `${platform}-${idx + 1}.${ext}`
-                        : `${platform}.${ext}`;
-                    // Stagger clicks slightly so the browser doesn't drop some.
-                    setTimeout(() => triggerAnchorDownload(mediaUrl, filename), idx * 400);
-                }
-            });
-            showSuccess(`\u2705 Downloading ${data.picker.length} item(s)...`, 'errorMessage');
-        } else if (status === 'error' || status === 'rate-limit') {
-            const msg = (data && data.text) || 'cobalt.tools returned an error';
-            throw new Error(msg);
-        } else {
-            throw new Error('Unexpected cobalt.tools response');
-        }
-    } catch (err) {
-        console.warn('cobalt.tools failed:', err && err.message);
-        // Fallback: open snapinsta.app in a new tab so the user can still download.
-        openSnapinstaFallback(url);
-        showError(
-            `Download error: ${err && err.message ? err.message : 'unknown'}. Opened snapinsta.app fallback in a new tab.`,
-            'errorMessage'
-        );
-    } finally {
-        btn.disabled = false;
-        btn.textContent = orig;
+    } catch (e) {
+        console.log('cobalt failed:', e && e.message);
     }
+
+    // Fallback: open the best downloader helper for the platform.
+    const platform = detectPlatform(url);
+    const helpers = {
+        instagram: 'https://snapinsta.app/',
+        tiktok: 'https://snaptik.app/',
+        youtube: 'https://yt1s.com/',
+        facebook: 'https://fdown.net/',
+        x: 'https://twittervideodownloader.com/',
+        default: `https://savefrom.net/#url=${encodeURIComponent(url)}`
+    };
+
+    const helperUrl = helpers[platform] || helpers.default;
+    window.open(helperUrl, '_blank');
+
+    // Copy the URL to the clipboard so the user can paste it into the helper.
+    try { await navigator.clipboard.writeText(url); } catch (e) {}
+
+    showSuccess('\u2705 Download helper opened! Your URL has been copied \u2014 just paste it there.', 'errorMessage');
+    btn.disabled = false;
+    btn.textContent = orig;
 }
 
 
