@@ -276,16 +276,19 @@ exports.handler = async (event) => {
         }
 
         if (!caption || caption.length < 5) {
-            // Could not extract - return a soft error message as the "original" so
-            // the UI can still display something helpful instead of crashing.
+            // Could not extract - return a structured error so the UI can display
+            // a helpful message rather than rendering it as a real flip result.
             return {
                 statusCode: 200,
                 headers,
                 body: JSON.stringify({
-                    original: '(Caption not available - the post may be private or the platform blocked access)',
-                    twisted: 'Could not extract the script from this post. Try pasting the caption manually in the Script Rewrite tab.',
+                    success: false,
+                    error: 'caption_unavailable',
+                    original: '',
+                    twisted: '',
                     prompt: '',
-                    platform
+                    platform,
+                    message: 'Could not extract the caption from this post — it may be private or the platform blocked access. Try copying the caption text and pasting it in the Script Rewrite tab.'
                 })
             };
         }
@@ -296,6 +299,7 @@ exports.handler = async (event) => {
             statusCode: 200,
             headers,
             body: JSON.stringify({
+                success: true,
                 original: caption,
                 twisted: flipped,
                 prompt: provenHook,
