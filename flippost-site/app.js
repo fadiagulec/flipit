@@ -233,10 +233,26 @@ async function handleExtractAndTwist() {
         }
 
         const data = await res.json();
+
+        // Handle graceful fallback when caption extraction failed
+        if (data.success === false) {
+            container.innerHTML = `
+                <div class="result-section" style="border-left:4px solid #ff6b00;padding:16px;">
+                    <h3>\u26A0\uFE0F Could Not Extract Caption</h3>
+                    <p class="result-text">${escapeHtml(data.message || 'The caption could not be extracted from this post.')}</p>
+                    <p style="margin-top:12px;color:#888;font-size:13px;">Tip: Copy the caption text from the post and paste it into the <strong>Script Rewrite</strong> tab for instant flipping.</p>
+                </div>`;
+            return;
+        }
+
         displayResults(data, platform);
     } catch (err) {
+        container.innerHTML = `
+            <div class="result-section" style="border-left:4px solid #ff4444;padding:16px;">
+                <h3>\u26A0\uFE0F Something went wrong</h3>
+                <p class="result-text">${escapeHtml(err.message)}</p>
+            </div>`;
         showError(`Error: ${err.message}`, 'errorMessage');
-        container.innerHTML = '';
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -391,6 +407,8 @@ function appendVideoPromptSection(container, flippedScript, platform) {
 }
 
 // ── SCRIPT REWRITE ───────────────────────────────────────
+const REWRITE_URL = '/.netlify/functions/rewrite-script';
+
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -406,10 +424,10 @@ async function handleRewriteScript() {
     container.innerHTML = '<div class="loading">\u2728 Creating your flipped version...</div>';
 
     try {
-        const res = await fetch(`${BACKEND_URL}/generate`, {
+        const res = await fetch(REWRITE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ script })
+            body: JSON.stringify({ script, tone: 'viral', platform: null })
         });
 
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Rewrite failed'); }
@@ -417,12 +435,13 @@ async function handleRewriteScript() {
         const data = await res.json();
         container.innerHTML = '';
         appendSection(container, 'Original Script', script, false);
-        appendSection(container, '\u2728 Flipped Version', data.twisted, true);
-        if (data.prompt) appendSection(container, '\u{1F3AF} Proven Hook', data.prompt, true);
+        appendSection(container, '\u2728 Flipped Version', data.rewritten, true);
+        if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
+        if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
 
-        // New: video creation prompt for AI video tools
-        if (data.twisted) {
-            appendVideoPromptSection(container, data.twisted, null);
+        // Video creation prompt for AI video tools
+        if (data.rewritten) {
+            appendVideoPromptSection(container, data.rewritten, null);
         }
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
@@ -434,6 +453,8 @@ async function handleRewriteScript() {
 }
 
 // ── NICHE IDEAS ──────────────────────────────────────────
+const NICHE_IDEAS_URL = '/.netlify/functions/niche-ideas';
+
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -450,17 +471,17 @@ async function handleGenerateIdeas() {
     container.innerHTML = '<div class="loading">\u{1F680} Creating viral script ideas...</div>';
 
     try {
-        const res = await fetch(`${BACKEND_URL}/generate`, {
+        const res = await fetch(NICHE_IDEAS_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ script: `Generate 3 viral script ideas for the niche: ${niche}\n\nDetails: ${description}` })
+            body: JSON.stringify({ niche, description })
         });
 
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Generation failed'); }
 
         const data = await res.json();
         container.innerHTML = '';
-        appendSection(container, '\u{1F4A1} Your 3 Viral Script Ideas', data.twisted, true);
+        appendSection(container, '\u{1F4A1} Your Viral Content Ideas', data.twisted, true);
         if (data.prompt) appendSection(container, '\u{1F3AF} Pro Tips', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'ideasErrorMessage');
