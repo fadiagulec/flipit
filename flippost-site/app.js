@@ -109,68 +109,69 @@ function openSnapinstaFallback(url) {
 }
 
 async function handleDownload() {
-    const url = document.getElementById('urlInput').value.trim();
+    const urlInput = document.getElementById('urlInput');
+    const url = urlInput.value.trim();
     if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
 
-    const btn = document.getElementById('downloadBtn');
-    const orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '\u23F3 DOWNLOADING...';
+    const downloadBtn = document.getElementById('downloadBtn');
+    const orig = downloadBtn.textContent;
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = '\u23F3 DOWNLOADING...';
 
-    // Try cobalt.tools API (may have CORS issues from the browser).
     try {
-        const resp = await fetch(COBALT_API, {
+        // Call our own Netlify Function (no CORS issues!)
+        const resp = await fetch('/.netlify/functions/download', {
             method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ url, vQuality: 'max', filenamePattern: 'basic' })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
         });
 
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
-                window.open(data.url, '_blank');
-                showSuccess('\u2705 Download started!', 'errorMessage');
-                btn.disabled = false;
-                btn.textContent = orig;
-                return;
-            }
-            if (data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
-                data.picker.forEach((item, i) => {
-                    setTimeout(() => window.open(item.url, '_blank'), i * 500);
-                });
-                showSuccess(`\u2705 Opening ${data.picker.length} files...`, 'errorMessage');
-                btn.disabled = false;
-                btn.textContent = orig;
-                return;
-            }
+        const data = await resp.json();
+
+        if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
+            // Open the direct download URL
+            const a = document.createElement('a');
+            a.href = data.url;
+            a.download = '';
+            a.target = '_blank';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            showSuccess('\u2705 Download started!', 'errorMessage');
+        } else if (data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
+            data.picker.forEach((item, i) => {
+                setTimeout(() => {
+                    const a = document.createElement('a');
+                    a.href = item.url;
+                    a.download = '';
+                    a.target = '_blank';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }, i * 600);
+            });
+            showSuccess(`\u2705 Downloading ${data.picker.length} files!`, 'errorMessage');
+        } else {
+            throw new Error(data.error || 'Could not get download link');
         }
-    } catch (e) {
-        console.log('cobalt failed:', e && e.message);
+    } catch (err) {
+        // Final fallback
+        const platform = detectPlatform(url);
+        const helpers = {
+            instagram: 'https://snapinsta.app/',
+            tiktok: 'https://snaptik.app/',
+            youtube: 'https://yt1s.com/',
+            facebook: 'https://fdown.net/',
+            x: 'https://twittervideodownloader.com/',
+        };
+        window.open(helpers[platform] || `https://savefrom.net/#url=${encodeURIComponent(url)}`, '_blank');
+        try { await navigator.clipboard.writeText(url); } catch (e) {}
+        showSuccess('\u2705 Opened download helper \u2014 URL copied, just paste it!', 'errorMessage');
     }
 
-    // Fallback: open the best downloader helper for the platform.
-    const platform = detectPlatform(url);
-    const helpers = {
-        instagram: 'https://snapinsta.app/',
-        tiktok: 'https://snaptik.app/',
-        youtube: 'https://yt1s.com/',
-        facebook: 'https://fdown.net/',
-        x: 'https://twittervideodownloader.com/',
-        default: `https://savefrom.net/#url=${encodeURIComponent(url)}`
-    };
-
-    const helperUrl = helpers[platform] || helpers.default;
-    window.open(helperUrl, '_blank');
-
-    // Copy the URL to the clipboard so the user can paste it into the helper.
-    try { await navigator.clipboard.writeText(url); } catch (e) {}
-
-    showSuccess('\u2705 Download helper opened! Your URL has been copied \u2014 just paste it there.', 'errorMessage');
-    btn.disabled = false;
-    btn.textContent = orig;
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = orig;
 }
 
 

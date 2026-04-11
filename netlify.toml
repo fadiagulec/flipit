@@ -1,9 +1,10 @@
 [build]
   base = "flippost-site"
-    publish = "."
-      command = ""
+  publish = "."
+  command = ""
+  functions = "../netlify/functions"
 
-      [[redirects]]
-        from = "/*"
-          to = "/index.html"
-            status = 200
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
