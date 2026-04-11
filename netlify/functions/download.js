@@ -1,10 +1,27 @@
-const fetch = require('node-fetch');
+const https = require('https');
+const http = require('http');
 
-const COBALT_INSTANCES = [
-  'https://dwnld.nichlov.com/',
-  'https://cobalt.eepy.cat/',
-  'https://cobalt.api.lostluma.dev/',
-];
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
+    const req = client.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      },
+      timeout: 10000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
+        catch(e) { resolve({ status: res.statusCode, data: {} }); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
 
 exports.handler = async (event) => {
   const headers = {
@@ -13,41 +30,36 @@ exports.handler = async (event) => {
     'Content-Type': 'application/json'
   };
 
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
   try {
     const { url } = JSON.parse(event.body || '{}');
     if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL required' }) };
 
-    let lastError = null;
-
-    for (const instance of COBALT_INSTANCES) {
+    // Try instavideosave API (works for Instagram, no auth needed)
+    if (url.includes('instagram.com')) {
       try {
-        const res = await fetch(instance, {
-          method: 'POST',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
-          timeout: 8000
-        });
-
-        const data = await res.json();
-
-        // Skip dead/error responses
-        if (data.status === 'error') {
-          lastError = data.text || 'instance error';
-          continue;
+        const apiUrl = `https://api.instavideosave.com/allinone?url=${encodeURIComponent(url)}`;
+        const result = await httpGet(apiUrl);
+        if (result.data && result.data.media && result.data.media.length > 0) {
+          const media = result.data.media;
+          if (media.length === 1) {
+            return { statusCode: 200, headers, body: JSON.stringify({ status: 'redirect', url: media[0].url }) };
+          } else {
+            return { statusCode: 200, headers, body: JSON.stringify({
+              status: 'picker',
+              picker: media.map(m => ({ url: m.url, type: m.type || 'video' }))
+            })};
+          }
         }
-
-        return { statusCode: 200, headers, body: JSON.stringify(data) };
-      } catch (e) {
-        lastError = e.message;
-        continue;
+      } catch(e) {
+        console.log('instavideosave failed:', e.message);
       }
     }
 
-    return { statusCode: 502, headers, body: JSON.stringify({ error: lastError || 'All instances failed' }) };
+    // Return fallback signal so client opens a helper
+    return { statusCode: 200, headers, body: JSON.stringify({ status: 'use-helper', url }) };
+
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }

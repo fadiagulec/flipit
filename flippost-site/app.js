@@ -114,64 +114,54 @@ async function handleDownload() {
     if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
 
     const downloadBtn = document.getElementById('downloadBtn');
-    const orig = downloadBtn.textContent;
+    const orig = downloadBtn.innerHTML;
     downloadBtn.disabled = true;
-    downloadBtn.textContent = '\u23F3 DOWNLOADING...';
+    downloadBtn.innerHTML = '\u23F3 Downloading...';
+
+    const platform = detectPlatform(url);
+    const helpers = {
+        instagram: 'https://snapinsta.app/',
+        tiktok: 'https://snaptik.app/',
+        youtube: 'https://yt1s.com/',
+        x: 'https://twittervideodownloader.com/',
+        facebook: 'https://fdown.net/'
+    };
+    const helperUrl = helpers[platform] || `https://savefrom.net/#url=${encodeURIComponent(url)}`;
 
     try {
-        // Call our own Netlify Function (no CORS issues!)
         const resp = await fetch('/.netlify/functions/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
-
         const data = await resp.json();
 
         if (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') {
-            // Open the direct download URL
             const a = document.createElement('a');
-            a.href = data.url;
-            a.download = '';
-            a.target = '_blank';
-            a.rel = 'noopener';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            a.href = data.url; a.target = '_blank'; a.download = 'flipit-media';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
             showSuccess('\u2705 Download started!', 'errorMessage');
-        } else if (data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
-            data.picker.forEach((item, i) => {
-                setTimeout(() => {
-                    const a = document.createElement('a');
-                    a.href = item.url;
-                    a.download = '';
-                    a.target = '_blank';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                }, i * 600);
-            });
+        } else if (data.status === 'picker' && data.picker && data.picker.length > 0) {
+            data.picker.forEach((item, i) => setTimeout(() => {
+                const a = document.createElement('a');
+                a.href = item.url; a.target = '_blank'; a.download = `flipit-${i + 1}`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            }, i * 700));
             showSuccess(`\u2705 Downloading ${data.picker.length} files!`, 'errorMessage');
         } else {
-            throw new Error(data.error || 'Could not get download link');
+            // use-helper or any unexpected response — open helper and copy URL
+            window.open(helperUrl, '_blank');
+            try { await navigator.clipboard.writeText(url); } catch(e) {}
+            showSuccess('\u{1F4CB} URL copied! Paste it on the download page that just opened.', 'errorMessage');
         }
-    } catch (err) {
-        // Final fallback
-        const platform = detectPlatform(url);
-        const helpers = {
-            instagram: 'https://snapinsta.app/',
-            tiktok: 'https://snaptik.app/',
-            youtube: 'https://yt1s.com/',
-            facebook: 'https://fdown.net/',
-            x: 'https://twittervideodownloader.com/',
-        };
-        window.open(helpers[platform] || `https://savefrom.net/#url=${encodeURIComponent(url)}`, '_blank');
-        try { await navigator.clipboard.writeText(url); } catch (e) {}
-        showSuccess('\u2705 Opened download helper \u2014 URL copied, just paste it!', 'errorMessage');
+    } catch(e) {
+        window.open(helperUrl, '_blank');
+        try { await navigator.clipboard.writeText(url); } catch(e2) {}
+        showSuccess('\u{1F4CB} URL copied! Paste it on the download page that just opened.', 'errorMessage');
     }
 
     downloadBtn.disabled = false;
-    downloadBtn.textContent = orig;
+    downloadBtn.innerHTML = orig;
 }
 
 
