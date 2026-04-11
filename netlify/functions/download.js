@@ -1,5 +1,12 @@
 const fetch = require('node-fetch');
 
+const COBALT_INSTANCES = [
+  'https://cobalt.api.timelessnesses.me/',
+  'https://co.wuk.sh/',
+  'https://cobalt-api.nico.moe/',
+  'https://cobalt.privacydev.net/'
+];
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -15,23 +22,29 @@ exports.handler = async (event) => {
     const { url } = JSON.parse(event.body || '{}');
     if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL required' }) };
 
-    // Try cobalt.tools from server side (no CORS issues here)
-    const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ url, vQuality: 'max', filenamePattern: 'basic' })
-    });
+    for (const instance of COBALT_INSTANCES) {
+      try {
+        const res = await fetch(instance, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, videoQuality: 'max', downloadMode: 'auto' }),
+          timeout: 8000
+        });
 
-    const data = await cobaltRes.json();
-    return { statusCode: 200, headers, body: JSON.stringify(data) };
+        if (!res.ok) continue;
+        const data = await res.json();
+
+        if (data.status === 'error' || !data.status) continue;
+
+        return { statusCode: 200, headers, body: JSON.stringify(data) };
+      } catch (e) {
+        console.log(`Instance ${instance} failed:`, e.message);
+        continue;
+      }
+    }
+
+    return { statusCode: 503, headers, body: JSON.stringify({ error: 'All download instances unavailable' }) };
   } catch (err) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: err.message })
-    };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
 };
