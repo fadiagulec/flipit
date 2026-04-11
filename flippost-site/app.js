@@ -82,220 +82,30 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
 // ── DOWNLOAD ─────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
-// CORS proxies tried in order. corsproxy.io is the most reliable free public
-// proxy; allorigins is a backup. Both are free and require no auth.
-const CORS_PROXIES = [
-    (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
-    (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)
-];
+// cobalt.tools is an open-source media downloader that works from the browser.
+// It's the most reliable free API for Instagram, TikTok, YouTube, etc.
+// https://github.com/imputnet/cobalt
+const COBALT_API = 'https://api.cobalt.tools/api/json';
 
-async function fetchJsonWithProxy(targetUrl) {
-    let lastErr;
-    for (const buildProxy of CORS_PROXIES) {
-        try {
-            const res = await fetch(buildProxy(targetUrl), {
-                signal: AbortSignal.timeout(15000)
-            });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return await res.json();
-        } catch (e) {
-            lastErr = e;
-        }
-    }
-    throw lastErr || new Error('All proxies failed');
+// Trigger a browser download by creating a hidden anchor tag and clicking it.
+function triggerAnchorDownload(fileUrl, filename) {
+    const a = document.createElement('a');
+    a.href = fileUrl;
+    if (filename) a.download = filename;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        if (a.parentNode) document.body.removeChild(a);
+    }, 1000);
 }
 
-// Pull the Instagram shortcode out of any reel/p/tv URL
-function extractInstagramShortcode(url) {
-    const m = url.match(/instagram\.com\/(?:reel|p|tv|reels)\/([A-Za-z0-9_-]+)/i);
-    return m ? m[1] : null;
-}
-
-async function downloadInstagram(url) {
-    // Strategy 1: instavideosave.com — free public API, returns direct media URLs.
-    try {
-        const apiUrl = 'https://api.instavideosave.com/allinone?url=' + encodeURIComponent(url);
-        const data = await fetchJsonWithProxy(apiUrl);
-        const mediaList = collectInstaMedia(data);
-        if (mediaList.length > 0) {
-            await downloadAllMedia(mediaList, 'instagram');
-            return true;
-        }
-    } catch (e) {
-        console.warn('instavideosave failed:', e.message);
-    }
-
-    // Strategy 2: Instagram public GraphQL endpoint via CORS proxy.
-    try {
-        const shortcode = extractInstagramShortcode(url);
-        if (shortcode) {
-            const igUrl = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
-            const data = await fetchJsonWithProxy(igUrl);
-            const mediaList = collectInstaMediaFromGraphql(data);
-            if (mediaList.length > 0) {
-                await downloadAllMedia(mediaList, 'instagram');
-                return true;
-            }
-        }
-    } catch (e) {
-        console.warn('Instagram GraphQL failed:', e.message);
-    }
-
-    return false;
-}
-
-function collectInstaMedia(data) {
-    // instavideosave.com response shapes vary; handle the common ones.
-    const out = [];
-    if (!data) return out;
-
-    if (typeof data.video_url === 'string') {
-        out.push({ url: data.video_url, type: 'video' });
-    }
-    if (typeof data.url === 'string' && /\.(mp4|jpg|jpeg|png)/i.test(data.url)) {
-        out.push({ url: data.url, type: /\.mp4/i.test(data.url) ? 'video' : 'image' });
-    }
-    if (Array.isArray(data.media)) {
-        data.media.forEach(m => {
-            if (m && m.url) {
-                out.push({
-                    url: m.url,
-                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
-                });
-            }
-        });
-    }
-    if (Array.isArray(data.data)) {
-        data.data.forEach(m => {
-            if (m && m.url) {
-                out.push({
-                    url: m.url,
-                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
-                });
-            }
-        });
-    }
-    if (Array.isArray(data.links)) {
-        data.links.forEach(m => {
-            if (typeof m === 'string') {
-                out.push({ url: m, type: /\.mp4/i.test(m) ? 'video' : 'image' });
-            } else if (m && m.url) {
-                out.push({
-                    url: m.url,
-                    type: m.type || (/\.mp4/i.test(m.url) ? 'video' : 'image')
-                });
-            }
-        });
-    }
-    return out;
-}
-
-function collectInstaMediaFromGraphql(data) {
-    const out = [];
-    const item = data && (
-        (data.items && data.items[0]) ||
-        (data.graphql && data.graphql.shortcode_media)
-    );
-    if (!item) return out;
-
-    // Carousel (private API style)
-    if (Array.isArray(item.carousel_media)) {
-        item.carousel_media.forEach(c => {
-            const v = c.video_versions && c.video_versions[0] && c.video_versions[0].url;
-            const i = c.image_versions2 &&
-                c.image_versions2.candidates &&
-                c.image_versions2.candidates[0] &&
-                c.image_versions2.candidates[0].url;
-            if (v) out.push({ url: v, type: 'video' });
-            else if (i) out.push({ url: i, type: 'image' });
-        });
-    }
-
-    // Carousel (graphql style)
-    if (item.edge_sidecar_to_children && Array.isArray(item.edge_sidecar_to_children.edges)) {
-        item.edge_sidecar_to_children.edges.forEach(({ node }) => {
-            if (node.is_video && node.video_url) out.push({ url: node.video_url, type: 'video' });
-            else if (node.display_url) out.push({ url: node.display_url, type: 'image' });
-        });
-    }
-
-    if (out.length === 0) {
-        // Single video
-        const v = (item.video_versions && item.video_versions[0] && item.video_versions[0].url) ||
-                  (item.is_video ? item.video_url : null);
-        if (v) {
-            out.push({ url: v, type: 'video' });
-        } else {
-            // Single image
-            const i = (item.image_versions2 &&
-                       item.image_versions2.candidates &&
-                       item.image_versions2.candidates[0] &&
-                       item.image_versions2.candidates[0].url) ||
-                      item.display_url;
-            if (i) out.push({ url: i, type: 'image' });
-        }
-    }
-
-    return out;
-}
-
-async function downloadTiktok(url) {
-    // tikwm.com — free public API, returns direct watermark-free MP4 URLs.
-    try {
-        const apiUrl = 'https://www.tikwm.com/api/?url=' + encodeURIComponent(url) + '&hd=1';
-        const data = await fetchJsonWithProxy(apiUrl);
-        if (data && data.data) {
-            const mediaList = [];
-            if (data.data.play) mediaList.push({ url: data.data.play, type: 'video' });
-            else if (data.data.wmplay) mediaList.push({ url: data.data.wmplay, type: 'video' });
-            if (mediaList.length > 0) {
-                await downloadAllMedia(mediaList, 'tiktok');
-                return true;
-            }
-        }
-    } catch (e) {
-        console.warn('tikwm failed:', e.message);
-    }
-    return false;
-}
-
-async function downloadAllMedia(mediaList, platform) {
-    for (let i = 0; i < mediaList.length; i++) {
-        const m = mediaList[i];
-        const ext = m.type === 'video' ? 'mp4' : 'jpg';
-        const filename = mediaList.length > 1
-            ? `${platform}-${i + 1}.${ext}`
-            : `${platform}.${ext}`;
-        await downloadFromUrl(m.url, filename);
-    }
-}
-
-async function downloadFromUrl(mediaUrl, filename) {
-    // Fetch through CORS proxy so the browser will give us a Blob we can save.
-    let lastErr;
-    for (const buildProxy of CORS_PROXIES) {
-        try {
-            const res = await fetch(buildProxy(mediaUrl), {
-                signal: AbortSignal.timeout(30000)
-            });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const blob = await res.blob();
-            const objUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = objUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
-            return;
-        } catch (e) {
-            lastErr = e;
-        }
-    }
-    // Last resort: just open the raw URL in a new tab so the user can save manually.
-    window.open(mediaUrl, '_blank');
-    throw lastErr || new Error('Could not fetch media');
+// Open the snapinsta.app fallback helper in a new tab when cobalt fails.
+function openSnapinstaFallback(url) {
+    const helperUrl = 'https://snapinsta.app/?url=' + encodeURIComponent(url);
+    window.open(helperUrl, '_blank', 'noopener,noreferrer');
 }
 
 async function handleDownload() {
@@ -311,65 +121,58 @@ async function handleDownload() {
     btn.textContent = '\u23F3 Downloading...';
 
     try {
-        let succeeded = false;
+        // Call the cobalt.tools API for the direct media URL.
+        const res = await fetch(COBALT_API, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url }),
+            signal: AbortSignal.timeout(20000)
+        });
 
-        // Strategy 1: client-side public APIs (no backend needed)
-        if (platform === 'instagram') {
-            succeeded = await downloadInstagram(url);
-        } else if (platform === 'tiktok') {
-            succeeded = await downloadTiktok(url);
+        if (!res.ok) {
+            throw new Error('cobalt.tools HTTP ' + res.status);
         }
 
-        // Strategy 2: legacy Railway backend (kept for completeness, may be down)
-        if (!succeeded) {
-            try {
-                const res = await fetch(`${BACKEND_URL}/download`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url }),
-                    signal: AbortSignal.timeout(8000)
-                });
-                if (res.ok) {
-                    const result = await res.json();
-                    if (result.items && Array.isArray(result.items)) {
-                        result.items.forEach((item, idx) =>
-                            triggerDownload(item, `${platform}-item-${idx}`));
-                        succeeded = true;
-                    } else if (result.video) {
-                        downloadBase64(result.video, `${platform}-video.mp4`, 'video/mp4');
-                        succeeded = true;
-                    } else if (result.image) {
-                        downloadBase64(result.image, `${platform}-image.jpg`, 'image/jpeg');
-                        succeeded = true;
-                    }
-                }
-            } catch (backendErr) {
-                console.warn('Backend download failed:', backendErr.message);
-            }
-        }
+        const data = await res.json();
+        const status = data && data.status;
 
-        if (succeeded) {
+        if ((status === 'redirect' || status === 'stream' || status === 'tunnel') && data.url) {
+            // Single media item — download directly.
+            const ext = /\.(mp4|mov|webm)(\?|$)/i.test(data.url) ? 'mp4' : 'media';
+            triggerAnchorDownload(data.url, `${platform}.${ext}`);
             showSuccess('\u2705 Download started!', 'errorMessage');
+        } else if (status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
+            // Carousel/multiple items — cobalt returns a picker array. Download all.
+            data.picker.forEach((item, idx) => {
+                const mediaUrl = item && (item.url || item.thumb);
+                if (mediaUrl) {
+                    const type = item.type || '';
+                    const ext = type === 'video' ? 'mp4' : 'jpg';
+                    const filename = data.picker.length > 1
+                        ? `${platform}-${idx + 1}.${ext}`
+                        : `${platform}.${ext}`;
+                    // Stagger clicks slightly so the browser doesn't drop some.
+                    setTimeout(() => triggerAnchorDownload(mediaUrl, filename), idx * 400);
+                }
+            });
+            showSuccess(`\u2705 Downloading ${data.picker.length} item(s)...`, 'errorMessage');
+        } else if (status === 'error' || status === 'rate-limit') {
+            const msg = (data && data.text) || 'cobalt.tools returned an error';
+            throw new Error(msg);
         } else {
-            // Strategy 3 (last resort): open a free download helper site in a new tab.
-            const encodedUrl = encodeURIComponent(url);
-            let helperUrl;
-            if (platform === 'instagram') {
-                helperUrl = 'https://snapinsta.app/?url=' + encodedUrl;
-            } else if (platform === 'tiktok') {
-                helperUrl = 'https://snaptik.app/?url=' + encodedUrl;
-            } else if (platform === 'youtube') {
-                helperUrl = 'https://yt1s.com/?q=' + encodedUrl;
-            } else if (platform === 'facebook') {
-                helperUrl = 'https://fdown.net/?URLz=' + encodedUrl;
-            } else {
-                helperUrl = 'https://snapinsta.app/?url=' + encodedUrl;
-            }
-            window.open(helperUrl, '_blank');
-            showSuccess('\u{1F517} Opening download helper...', 'errorMessage');
+            throw new Error('Unexpected cobalt.tools response');
         }
     } catch (err) {
-        showError(`Download error: ${err.message}`, 'errorMessage');
+        console.warn('cobalt.tools failed:', err && err.message);
+        // Fallback: open snapinsta.app in a new tab so the user can still download.
+        openSnapinstaFallback(url);
+        showError(
+            `Download error: ${err && err.message ? err.message : 'unknown'}. Opened snapinsta.app fallback in a new tab.`,
+            'errorMessage'
+        );
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -526,33 +329,57 @@ function buildVideoPrompt(flippedScript, platform) {
 }
 
 function appendVideoPromptSection(container, flippedScript, platform) {
-    const promptText = buildVideoPrompt(flippedScript, platform);
+    // Trigger button — the actual prompt section is revealed on click.
+    const triggerWrap = document.createElement('div');
+    triggerWrap.className = 'video-prompt-trigger';
+    triggerWrap.style.cssText = 'margin-top:16px;display:flex;justify-content:center;';
 
-    const div = document.createElement('div');
-    div.className = 'result-section';
+    const triggerBtn = document.createElement('button');
+    triggerBtn.className = 'btn-primary';
+    triggerBtn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
+    triggerBtn.textContent = '\u{1F3AC} VIDEO PROMPT';
+    triggerWrap.appendChild(triggerBtn);
+    container.appendChild(triggerWrap);
 
-    const heading = document.createElement('h3');
-    heading.textContent = '\u{1F3AC} Video Creation Prompt';
-    div.appendChild(heading);
+    // The revealed section — built once on first click.
+    triggerBtn.addEventListener('click', () => {
+        // If already built, just toggle visibility.
+        const existing = container.querySelector('.video-prompt-section');
+        if (existing) {
+            existing.style.display = existing.style.display === 'none' ? '' : 'none';
+            return;
+        }
 
-    const sub = document.createElement('p');
-    sub.style.cssText = 'color:#888;font-size:12px;margin-bottom:10px;text-transform:none;letter-spacing:0;';
-    sub.textContent = 'Paste this into Runway, Pika Labs, Kling, Sora, or any AI video tool.';
-    div.appendChild(sub);
+        const promptText = buildVideoPrompt(flippedScript, platform);
 
-    const textEl = document.createElement('p');
-    textEl.className = 'result-text';
-    textEl.textContent = promptText;
-    div.appendChild(textEl);
+        const div = document.createElement('div');
+        div.className = 'result-section video-prompt-section';
 
-    const btn = document.createElement('button');
-    btn.className = 'btn-primary copy-btn';
-    btn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;flex:none;';
-    btn.textContent = '\u{1F4CB} Copy Video Prompt';
-    btn.onclick = () => copyToClipboard(btn);
-    div.appendChild(btn);
+        const heading = document.createElement('h3');
+        heading.textContent = '\u{1F3AC} Video Creation Prompt';
+        div.appendChild(heading);
 
-    container.appendChild(div);
+        const sub = document.createElement('p');
+        sub.style.cssText = 'color:#888;font-size:12px;margin-bottom:10px;text-transform:none;letter-spacing:0;';
+        sub.textContent = 'Paste this into Runway, Pika Labs, Kling, Sora, or any AI video tool.';
+        div.appendChild(sub);
+
+        const textEl = document.createElement('p');
+        textEl.className = 'result-text';
+        textEl.style.whiteSpace = 'pre-wrap';
+        textEl.textContent = promptText;
+        div.appendChild(textEl);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-primary copy-btn';
+        copyBtn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;flex:none;';
+        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
+        copyBtn.onclick = () => copyToClipboard(copyBtn);
+        div.appendChild(copyBtn);
+
+        container.appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 }
 
 // ── SCRIPT REWRITE ───────────────────────────────────────
