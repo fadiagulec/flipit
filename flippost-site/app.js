@@ -107,12 +107,19 @@ async function handleDownload() {
 
         if (res.ok && data.downloadUrl) {
             btn.textContent = '\u2B07\uFE0F Starting download...';
-            window.open(data.downloadUrl, '_blank');
-            showSuccess(`\u2705 Download started!`, 'errorMessage');
+
+            // If carousel with multiple images, show download panel
+            if (data.carousel && data.carousel.length > 1) {
+                showCarouselDownloads(data.carousel, data.platform);
+                showSuccess(`\u{1F3A0} Found ${data.carousel.length} media items! Click each to download.`, 'errorMessage');
+            } else {
+                window.open(data.downloadUrl, '_blank');
+                const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
+                showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
+            }
         } else if (res.ok && data.openUrl) {
-            // Platform blocks server-side download — open post with save instructions
             window.open(data.openUrl, '_blank');
-            showSuccess(`\u{1F4F1} ${data.instruction || 'Save the video from the app directly.'}`, 'errorMessage');
+            showSuccess(`\u{1F4F1} ${data.instruction || 'Save the media from the app directly.'}`, 'errorMessage');
         } else {
             showError(`\u274C Could not process this link. Please try again.`, 'errorMessage');
         }
@@ -123,6 +130,23 @@ async function handleDownload() {
         btn.disabled = false;
         btn.textContent = origText;
     }
+}
+
+function showCarouselDownloads(items, platform) {
+    const container = document.getElementById('resultsContainer');
+    const html = items.map((item, i) => {
+        const icon = item.type === 'video' ? '\u{1F3AC}' : '\u{1F5BC}\uFE0F';
+        const label = item.type === 'video' ? 'Video' : 'Image';
+        return `<a href="${item.url}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#0d6e66;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;transition:all 0.2s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(13,110,102,0.3)'" onmouseout="this.style.transform='';this.style.boxShadow=''">${icon} ${label} ${i + 1}</a>`;
+    }).join('');
+
+    const section = document.createElement('div');
+    section.className = 'result-section';
+    section.innerHTML = `
+        <h3>\u{1F3A0} Carousel — ${items.length} items found</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">${html}</div>
+    `;
+    container.prepend(section);
 }
 
 // ── EXTRACT & FLIP ───────────────────────────────────────

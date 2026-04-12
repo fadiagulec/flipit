@@ -1,7 +1,9 @@
 // Netlify function: /download
-// Reliable video download — uses Microlink API (best free option)
-// Works great for YouTube. For Instagram/TikTok/X, these platforms
-// block server-side extraction, so we provide direct links to save.
+// Multi-strategy media download: video + images + carousels
+// YouTube video: Microlink API (confirmed working)
+// Twitter media: Syndication API (videos + images)
+// All platforms: OG meta tags for video/image extraction
+// Fallback: platform-specific save instructions
 
 const fetch = require('node-fetch');
 
@@ -34,7 +36,7 @@ exports.handler = async (event) => {
 
   const platform = detectPlatform(url);
 
-  // Strategy 1: Microlink API — works reliably for YouTube and some others
+  // Strategy 1: Microlink API — video + image extraction
   try {
     const result = await tryMicrolink(url);
     if (result) {
@@ -44,7 +46,7 @@ exports.handler = async (event) => {
     console.log('Microlink failed:', e.message);
   }
 
-  // Strategy 2: Twitter syndication API — for X/Twitter videos
+  // Strategy 2: Twitter syndication API — videos + images + carousels
   if (platform === 'x') {
     try {
       const result = await tryTwitter(url);
@@ -56,25 +58,25 @@ exports.handler = async (event) => {
     }
   }
 
-  // Strategy 3: OG video meta tags from page HTML
+  // Strategy 3: OG meta tags — video AND image extraction
   try {
-    const result = await tryOgVideo(url);
+    const result = await tryOgMeta(url);
     if (result) {
       return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'og-meta', platform }) };
     }
   } catch (e) {
-    console.log('OG video failed:', e.message);
+    console.log('OG meta failed:', e.message);
   }
 
-  // No download found — return platform-specific save instructions
+  // No direct download — return save instructions
   const instructions = {
-    instagram: 'Open the reel in Instagram app → tap ••• → Save → Video will save to your camera roll',
-    tiktok: 'Open in TikTok app → tap Share arrow → tap "Save video"',
-    youtube: 'Use YouTube app download button or YouTube Premium',
-    x: 'Open in X app → tap Share → tap "Bookmark" or use screen recording',
-    facebook: 'Open in Facebook app → tap ••• → Save video',
-    linkedin: 'Open in LinkedIn app → tap ••• → Save',
-    threads: 'Open in Threads app → tap Share → Save'
+    instagram: 'Open in Instagram app → tap ••• → Save. For carousels, swipe to each image and screenshot, or use "Save to Collection".',
+    tiktok: 'Open in TikTok app → tap Share arrow → tap "Save video". For photo posts, long-press the image → Save.',
+    youtube: 'Use YouTube app download button (YouTube Premium) or save to Watch Later.',
+    x: 'Open in X app → tap the image to fullscreen → long-press → "Save image". For videos, tap Share → Bookmark.',
+    facebook: 'Open in Facebook app → tap ••• → Save video/photo.',
+    linkedin: 'Open in LinkedIn app → tap ••• → Save.',
+    threads: 'Open in Threads app → tap Share → Save.'
   };
 
   return {
@@ -84,7 +86,7 @@ exports.handler = async (event) => {
       downloadUrl: null,
       openUrl: url,
       platform,
-      instruction: instructions[platform] || 'Open the post and use the app\'s built-in save option',
+      instruction: instructions[platform] || 'Open the post and use the app\'s built-in save option.',
       source: 'manual'
     })
   };
@@ -101,6 +103,7 @@ function detectPlatform(url) {
   return 'other';
 }
 
+// ── Microlink: extracts video AND image ─────────────────────
 async function tryMicrolink(url) {
   const apiUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&video=true`;
   const controller = new AbortController();
@@ -110,8 +113,22 @@ async function tryMicrolink(url) {
     const res = await fetch(apiUrl, { signal: controller.signal });
     const data = await res.json();
 
-    if (data.status === 'success' && data.data && data.data.video && data.data.video.url) {
-      return { downloadUrl: data.data.video.url, filename: null };
+    if (data.status === 'success' && data.data) {
+      // Try video first
+      if (data.data.video && data.data.video.url) {
+        return { downloadUrl: data.data.video.url, filename: null, type: 'video' };
+      }
+      // Then try image (skip base64 placeholders and tiny icons)
+      if (data.data.image && data.data.image.url &&
+          !data.data.image.url.startsWith('data:') &&
+          data.data.image.url.startsWith('http')) {
+        // Check image dimensions if available — skip small icons
+        const w = data.data.image.width || 999;
+        const h = data.data.image.height || 999;
+        if (w > 200 && h > 200) {
+          return { downloadUrl: data.data.image.url, filename: null, type: 'image' };
+        }
+      }
     }
   } finally {
     clearTimeout(timeout);
@@ -119,12 +136,12 @@ async function tryMicrolink(url) {
   return null;
 }
 
+// ── Twitter syndication: videos + images + carousels ────────
 async function tryTwitter(url) {
   const match = url.match(/status\/(\d+)/);
   if (!match) return null;
 
   const tweetId = match[1];
-  // Try multiple syndication endpoints
   const endpoints = [
     `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=x`,
     `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=a`
@@ -146,17 +163,65 @@ async function tryTwitter(url) {
 
       const data = JSON.parse(text);
 
-      if (data.mediaDetails) {
-        for (const media of data.mediaDetails) {
-          if (media.video_info && media.video_info.variants) {
-            const mp4s = media.video_info.variants
-              .filter(v => v.content_type === 'video/mp4')
-              .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-            if (mp4s.length > 0) {
-              return { downloadUrl: mp4s[0].url, filename: `twitter_${tweetId}.mp4` };
+      // Check mediaDetails for videos and images
+      if (data.mediaDetails && data.mediaDetails.length > 0) {
+        // Multiple media = carousel
+        if (data.mediaDetails.length > 1) {
+          const images = [];
+          for (const media of data.mediaDetails) {
+            if (media.video_info && media.video_info.variants) {
+              const mp4s = media.video_info.variants
+                .filter(v => v.content_type === 'video/mp4')
+                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+              if (mp4s.length > 0) {
+                images.push({ url: mp4s[0].url, type: 'video' });
+              }
+            } else if (media.media_url_https) {
+              images.push({ url: media.media_url_https + '?name=large', type: 'image' });
             }
           }
+          if (images.length > 0) {
+            return {
+              downloadUrl: images[0].url,
+              carousel: images,
+              filename: `twitter_${tweetId}_carousel`,
+              type: images[0].type,
+              mediaCount: images.length
+            };
+          }
         }
+
+        // Single media
+        const media = data.mediaDetails[0];
+        if (media.video_info && media.video_info.variants) {
+          const mp4s = media.video_info.variants
+            .filter(v => v.content_type === 'video/mp4')
+            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+          if (mp4s.length > 0) {
+            return { downloadUrl: mp4s[0].url, filename: `twitter_${tweetId}.mp4`, type: 'video' };
+          }
+        }
+        if (media.media_url_https) {
+          return { downloadUrl: media.media_url_https + '?name=large', filename: `twitter_${tweetId}.jpg`, type: 'image' };
+        }
+      }
+
+      // Check photos array
+      if (data.photos && data.photos.length > 0) {
+        if (data.photos.length > 1) {
+          const images = data.photos.map((p, i) => ({
+            url: p.url + '?name=large',
+            type: 'image'
+          }));
+          return {
+            downloadUrl: images[0].url,
+            carousel: images,
+            filename: `twitter_${tweetId}_carousel`,
+            type: 'image',
+            mediaCount: images.length
+          };
+        }
+        return { downloadUrl: data.photos[0].url + '?name=large', filename: `twitter_${tweetId}.jpg`, type: 'image' };
       }
     } catch (e) {
       continue;
@@ -165,7 +230,8 @@ async function tryTwitter(url) {
   return null;
 }
 
-async function tryOgVideo(url) {
+// ── OG meta tags: video AND image extraction ────────────────
+async function tryOgMeta(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
 
@@ -181,8 +247,8 @@ async function tryOgVideo(url) {
 
     const html = await res.text();
 
-    // Look for video in meta tags
-    const patterns = [
+    // Try video first
+    const videoPatterns = [
       /property="og:video:secure_url"\s+content="([^"]+)"/,
       /content="([^"]+)"\s+property="og:video:secure_url"/,
       /property="og:video"\s+content="([^"]+)"/,
@@ -190,10 +256,26 @@ async function tryOgVideo(url) {
       /name="twitter:player:stream"\s+content="([^"]+)"/
     ];
 
-    for (const pattern of patterns) {
+    for (const pattern of videoPatterns) {
       const m = html.match(pattern);
-      if (m && m[1] && m[1].startsWith('http') && (m[1].includes('.mp4') || m[1].includes('video'))) {
-        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'video.mp4' };
+      if (m && m[1] && m[1].startsWith('http') && !m[1].includes('embed')) {
+        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'video.mp4', type: 'video' };
+      }
+    }
+
+    // Then try image (get the largest/best quality)
+    const imagePatterns = [
+      /property="og:image"\s+content="([^"]+)"/,
+      /content="([^"]+)"\s+property="og:image"/,
+      /name="twitter:image"\s+content="([^"]+)"/,
+      /content="([^"]+)"\s+name="twitter:image"/,
+      /name="twitter:image:src"\s+content="([^"]+)"/
+    ];
+
+    for (const pattern of imagePatterns) {
+      const m = html.match(pattern);
+      if (m && m[1] && m[1].startsWith('http') && !m[1].startsWith('data:')) {
+        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'image.jpg', type: 'image' };
       }
     }
   } finally {
