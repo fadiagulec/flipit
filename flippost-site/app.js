@@ -134,17 +134,23 @@ async function handleDownload() {
 
 function showCarouselDownloads(items, platform) {
     const container = document.getElementById('resultsContainer');
-    const html = items.map((item, i) => {
+
+    // Download All button
+    const downloadAllBtn = `<button onclick="document.querySelectorAll('.carousel-dl-link').forEach((a,i)=>{setTimeout(()=>window.open(a.href,'_blank'),i*800)})" style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;">\u2B07\uFE0F Download All ${items.length} Items</button>`;
+
+    // Individual buttons
+    const individualBtns = items.map((item, i) => {
         const icon = item.type === 'video' ? '\u{1F3AC}' : '\u{1F5BC}\uFE0F';
         const label = item.type === 'video' ? 'Video' : 'Image';
-        return `<a href="${item.url}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#0d6e66;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;transition:all 0.2s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(13,110,102,0.3)'" onmouseout="this.style.transform='';this.style.boxShadow=''">${icon} ${label} ${i + 1}</a>`;
+        return `<a href="${item.url}" target="_blank" rel="noopener" class="carousel-dl-link" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;" onmouseover="this.style.background='#0d6e66';this.style.color='#fff'" onmouseout="this.style.background='#fff';this.style.color='#0d6e66'">${icon} ${label} ${i + 1}</a>`;
     }).join('');
 
     const section = document.createElement('div');
     section.className = 'result-section';
     section.innerHTML = `
         <h3>\u{1F3A0} Carousel — ${items.length} items found</h3>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">${html}</div>
+        ${downloadAllBtn}
+        <div style="display:flex;flex-wrap:wrap;gap:10px;">${individualBtns}</div>
     `;
     container.prepend(section);
 }
@@ -371,6 +377,26 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
         container.appendChild(div);
         div.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+}
+
+// ── HELPERS FOR PROMPT BUILDING ──────────────────────────
+function stripHashtags(text) {
+    return text.replace(/#\w+/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function guessTopic(text) {
+    const firstSent = (text.split(/[.!?\n]/)[0] || text).trim();
+    const clean = firstSent.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]+/g, '').replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!clean) return 'this';
+    const stop = new Set(['i','you','we','they','he','she','it','the','a','an','my','your','our','their','this','that','and','or','but','so','if','to','of','in','on','at','by','for','with','as','is','am','are','was','were','be','been','have','has','had','do','does','did','will','would','should','could','may','might','can','just','really','very','im','ill','its','put','get','got','go','going','went','make','made','here','there','now','then','some','all','any','me','us','them','about','into','up','down','out','over','under','off','from','than','too','free','new','step','together']);
+    const words = clean.split(' ').filter(Boolean);
+    let best = [], cur = [];
+    for (const w of words) {
+        if (w.length > 2 && !stop.has(w)) { cur.push(w); if (cur.length > best.length) best = cur.slice(); }
+        else { cur = []; }
+        if (best.length >= 4) break;
+    }
+    return best.length ? best.slice(0, 4).join(' ') : (words.slice(0, 3).join(' ') || 'this');
 }
 
 // ── IMAGE PROMPT BUILDER ────────────────────────────────
