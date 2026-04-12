@@ -79,7 +79,7 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ── DOWNLOAD / SAVE MEDIA ────────────────────────────────
+// ── DOWNLOAD MEDIA ──────────────────────────────────────
 const DOWNLOAD_URL = '/.netlify/functions/download';
 
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
@@ -94,7 +94,7 @@ async function handleDownload() {
     const origText = btn.textContent;
 
     btn.disabled = true;
-    btn.textContent = '\u23F3 Downloading...';
+    btn.textContent = '\u23F3 Finding download link...';
 
     try {
         const res = await fetch(DOWNLOAD_URL, {
@@ -106,48 +106,21 @@ async function handleDownload() {
         const data = await res.json();
 
         if (res.ok && data.downloadUrl) {
-            // Trigger actual file download
-            triggerDownload(data.downloadUrl, data.filename);
-            showSuccess('\u2705 Download started!', 'errorMessage');
+            btn.textContent = '\u2B07\uFE0F Starting download...';
+            // Open download URL in new tab — this triggers the actual file download
+            window.open(data.downloadUrl, '_blank');
+            showSuccess(`\u2705 Download started! (via ${data.source || 'direct'})`, 'errorMessage');
         } else {
-            // All extraction methods failed — fall back to opening the post
-            fallbackOpenPost(url, platform);
+            // All methods failed — show helpful message
+            showError(`\u274C Could not extract download link for this ${platform || ''} post. Try right-clicking the video in the original post and "Save video as..."`, 'errorMessage');
         }
     } catch (err) {
         console.error('Download error:', err);
-        // Network error — fall back to opening the post
-        fallbackOpenPost(url, platform);
+        showError('\u274C Network error. Please try again.', 'errorMessage');
     } finally {
         btn.disabled = false;
         btn.textContent = origText;
     }
-}
-
-function triggerDownload(downloadUrl, filename) {
-    // Open the direct media URL — browser will download video/image files
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    if (filename) a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-}
-
-function fallbackOpenPost(url, platform) {
-    const saveInstructions = {
-        instagram: 'Tap the bookmark icon to save, or long-press the image/video to download.',
-        tiktok: 'Tap the share arrow, then "Save video" to download directly.',
-        youtube: 'Use the download button below the video (YouTube Premium) or save to Watch Later.',
-        x: 'Tap the share icon, then "Bookmark" or long-press media to save.',
-        facebook: 'Tap the three dots menu, then "Save video" or "Save photo".',
-        linkedin: 'Tap the three dots menu on the post to save it.',
-        threads: 'Tap the share icon to save or repost.'
-    };
-    const instruction = saveInstructions[platform] || 'Use the save/download option in the app.';
-    window.open(url, '_blank', 'noopener,noreferrer');
-    showSuccess(`\u2139\uFE0F Direct download unavailable. Post opened \u2014 ${instruction}`, 'errorMessage');
 }
 
 // ── EXTRACT & FLIP ───────────────────────────────────────
