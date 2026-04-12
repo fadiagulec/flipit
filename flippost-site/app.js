@@ -234,9 +234,9 @@ function displayResults(data, platform) {
     appendSection(container, '\u2728 Flipped Version', data.twisted, true);
     if (data.prompt) appendSection(container, '\u{1F3AF} Proven Hook', data.prompt, true);
 
-    // New: video creation prompt for AI video tools
+    // Prompt buttons row: Video + Image
     if (data.twisted) {
-        appendVideoPromptSection(container, data.twisted, platform);
+        appendPromptButtons(container, data.twisted, data.original, platform);
     }
 }
 
@@ -300,55 +300,179 @@ function buildVideoPrompt(flippedScript, platform) {
     ].join('\n');
 }
 
+// ── PROMPT BUTTONS (Video + Image) ──────────────────────
+function appendPromptButtons(container, flippedScript, originalCaption, platform) {
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
+
+    // Video Prompt button
+    const videoBtn = document.createElement('button');
+    videoBtn.className = 'btn-primary';
+    videoBtn.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;flex:1;min-width:180px;';
+    videoBtn.textContent = '\u{1F3AC} VIDEO PROMPT';
+    btnRow.appendChild(videoBtn);
+
+    // Image Prompt button
+    const imageBtn = document.createElement('button');
+    imageBtn.className = 'btn-secondary';
+    imageBtn.style.cssText = 'background:linear-gradient(135deg,#c2185b,#e8734a);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;flex:1;min-width:180px;';
+    imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
+    btnRow.appendChild(imageBtn);
+
+    container.appendChild(btnRow);
+
+    // Video Prompt click handler
+    videoBtn.addEventListener('click', () => {
+        const existing = container.querySelector('.video-prompt-section');
+        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
+
+        const promptText = buildVideoPrompt(flippedScript, platform);
+        const div = document.createElement('div');
+        div.className = 'result-section video-prompt-section';
+        div.innerHTML = `
+            <h3>\u{1F3AC} Video Creation Prompt</h3>
+            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
+            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
+        `;
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
+        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
+        copyBtn.onclick = () => copyToClipboard(copyBtn);
+        div.appendChild(copyBtn);
+        container.appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    // Image Prompt click handler
+    imageBtn.addEventListener('click', () => {
+        const existing = container.querySelector('.image-prompt-section');
+        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
+
+        const prompts = buildImagePrompts(flippedScript, originalCaption, platform);
+        const div = document.createElement('div');
+        div.className = 'result-section image-prompt-section';
+        div.style.borderLeftColor = '#c2185b';
+
+        let html = '<h3>\u{1F5BC}\uFE0F Image Creation Prompts</h3>';
+        html += '<p style="color:#777;font-size:14px;margin-bottom:14px;">Paste into Midjourney, DALL-E, Ideogram, Leonardo, or any AI image tool.</p>';
+
+        prompts.forEach((p, i) => {
+            html += `
+                <div style="margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
+                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">${p.label}</p>
+                    <p class="result-text" style="margin-bottom:8px;">${escapeHtml(p.prompt)}</p>
+                    <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                </div>
+            `;
+        });
+
+        div.innerHTML = html;
+        container.appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+}
+
+// ── IMAGE PROMPT BUILDER ────────────────────────────────
+function buildImagePrompts(flippedScript, originalCaption, platform) {
+    const script = (flippedScript || '').trim();
+    const original = (originalCaption || '').trim();
+    const lower = script.toLowerCase();
+
+    // Detect content type for styling
+    let style, mood, setting;
+    if (/fitness|workout|gym|health|body|muscle/.test(lower)) {
+        style = 'fitness lifestyle photography';
+        mood = 'energetic, powerful, motivated';
+        setting = 'modern gym or outdoor fitness space, golden hour lighting';
+    } else if (/food|recipe|cook|kitchen|meal|eat/.test(lower)) {
+        style = 'professional food photography';
+        mood = 'warm, appetizing, cozy';
+        setting = 'rustic kitchen counter or marble table, soft natural window light';
+    } else if (/travel|trip|adventure|explore|beach|mountain/.test(lower)) {
+        style = 'travel photography';
+        mood = 'wanderlust, freedom, epic';
+        setting = 'breathtaking landscape, vibrant colors, cinematic composition';
+    } else if (/business|entrepreneur|startup|money|income|hustle/.test(lower)) {
+        style = 'professional business photography';
+        mood = 'confident, sleek, aspirational';
+        setting = 'modern workspace or luxury office, clean minimal aesthetic';
+    } else if (/beauty|skincare|makeup|glow|skin/.test(lower)) {
+        style = 'beauty editorial photography';
+        mood = 'glowing, elegant, fresh';
+        setting = 'soft diffused lighting, clean pastel background, dewy skin texture';
+    } else if (/fashion|outfit|style|wear|look/.test(lower)) {
+        style = 'fashion editorial photography';
+        mood = 'trendy, bold, curated';
+        setting = 'urban street or minimalist studio, dramatic lighting';
+    } else if (/mindset|motivation|success|growth|manifest/.test(lower)) {
+        style = 'inspirational lifestyle photography';
+        mood = 'calm, focused, powerful';
+        setting = 'minimalist space with warm tones, sunrise or golden hour light';
+    } else if (/tech|app|software|ai|digital|code/.test(lower)) {
+        style = 'tech product photography';
+        mood = 'futuristic, clean, innovative';
+        setting = 'dark sleek desk setup, neon accent lights, shallow depth of field';
+    } else if (/home|interior|decor|design|room|space/.test(lower)) {
+        style = 'interior design photography';
+        mood = 'warm, inviting, aesthetic';
+        setting = 'beautifully styled room, natural light through windows, earth tones';
+    } else {
+        style = 'social media content photography';
+        mood = 'engaging, authentic, scroll-stopping';
+        setting = 'aesthetically pleasing environment, natural lighting, warm tones';
+    }
+
+    // Extract key topic
+    const topic = guessTopic(stripHashtags(script));
+
+    // Build 3 different prompts
+    return [
+        {
+            label: '\u{1F4F8} Carousel Cover / Hero Image',
+            prompt: `Create a ${style} image for a social media post about "${topic}". ${setting}. Mood: ${mood}. The composition should be Instagram-ready (4:5 aspect ratio), with space for bold text overlay at the top. Subject is centered and visually striking. Shot on Sony A7IV, 35mm f/1.4, natural light. High resolution, editorial quality. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F3A8} Carousel Slide / Supporting Image',
+            prompt: `Minimalist infographic-style image for a social media carousel slide about "${topic}". Light cream background (#faf8f5), clean typography area on the right side. Left side shows a ${style.replace('photography','')} visual element related to the topic. Soft shadows, modern design, warm color palette with teal (#0d6e66) and coral (#e8734a) accents. Flat lay or isometric angle. 4:5 aspect ratio. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F525} Scroll-Stopping Hook Image',
+            prompt: `Dramatic, attention-grabbing ${style} image that visualizes this concept: "${script.split(/[.!?\n]/)[0] || topic}". Ultra close-up or wide cinematic shot, ${mood} mood. Bold contrast, ${setting}. The image should make someone stop scrolling — use unusual angles, vivid colors, or visual tension. Vertical format 9:16 for Reels/TikTok. Shot on cinema camera, anamorphic lens. --ar 9:16 --style raw --v 6.1`
+        }
+    ];
+}
+
 function appendVideoPromptSection(container, flippedScript, platform) {
-    // Trigger button — the actual prompt section is revealed on click.
+    // Kept for Script Rewrite tab which still calls this directly
     const triggerWrap = document.createElement('div');
-    triggerWrap.className = 'video-prompt-trigger';
-    triggerWrap.style.cssText = 'margin-top:16px;display:flex;justify-content:center;';
+    triggerWrap.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
 
     const triggerBtn = document.createElement('button');
     triggerBtn.className = 'btn-primary';
-    triggerBtn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:8px;cursor:pointer;font-size:14px;';
+    triggerBtn.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;';
     triggerBtn.textContent = '\u{1F3AC} VIDEO PROMPT';
     triggerWrap.appendChild(triggerBtn);
     container.appendChild(triggerWrap);
 
-    // The revealed section — built once on first click.
     triggerBtn.addEventListener('click', () => {
-        // If already built, just toggle visibility.
         const existing = container.querySelector('.video-prompt-section');
-        if (existing) {
-            existing.style.display = existing.style.display === 'none' ? '' : 'none';
-            return;
-        }
+        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
         const promptText = buildVideoPrompt(flippedScript, platform);
-
         const div = document.createElement('div');
         div.className = 'result-section video-prompt-section';
-
-        const heading = document.createElement('h3');
-        heading.textContent = '\u{1F3AC} Video Creation Prompt';
-        div.appendChild(heading);
-
-        const sub = document.createElement('p');
-        sub.style.cssText = 'color:#888;font-size:12px;margin-bottom:10px;text-transform:none;letter-spacing:0;';
-        sub.textContent = 'Paste this into Runway, Pika Labs, Kling, Sora, or any AI video tool.';
-        div.appendChild(sub);
-
-        const textEl = document.createElement('p');
-        textEl.className = 'result-text';
-        textEl.style.whiteSpace = 'pre-wrap';
-        textEl.textContent = promptText;
-        div.appendChild(textEl);
-
+        div.innerHTML = `
+            <h3>\u{1F3AC} Video Creation Prompt</h3>
+            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
+            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
+        `;
         const copyBtn = document.createElement('button');
-        copyBtn.className = 'btn-primary copy-btn';
-        copyBtn.style.cssText = 'background:linear-gradient(135deg,#ff6b00,#ff9500);color:#fff;width:auto;flex:none;';
+        copyBtn.className = 'copy-btn';
+        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
         copyBtn.textContent = '\u{1F4CB} Copy Prompt';
         copyBtn.onclick = () => copyToClipboard(copyBtn);
         div.appendChild(copyBtn);
-
         container.appendChild(div);
         div.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -387,9 +511,9 @@ async function handleRewriteScript() {
         if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
         if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
 
-        // Video creation prompt for AI video tools
+        // Video + Image prompts
         if (data.rewritten) {
-            appendVideoPromptSection(container, data.rewritten, null);
+            appendPromptButtons(container, data.rewritten, script, null);
         }
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
