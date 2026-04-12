@@ -5,6 +5,11 @@
   functions = "../netlify/functions"
 
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
+  from = "/landing"
+  to = "/flipit-landing-page.html"
+  status = 200
+
+[[redirects]]
+  from = "/thanks"
+  to = "/thank-you.html"
   status = 200
