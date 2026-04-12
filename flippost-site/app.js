@@ -110,6 +110,7 @@ async function handleDownload() {
 
             // If carousel with multiple images, show download panel
             if (data.carousel && data.carousel.length > 1) {
+                window._lastCarouselCount = data.carousel.length;
                 showCarouselDownloads(data.carousel, data.platform);
                 showSuccess(`\u{1F3A0} Found ${data.carousel.length} media items! Click each to download.`, 'errorMessage');
             } else {
@@ -242,7 +243,9 @@ function displayResults(data, platform) {
 
     // Prompt buttons row: Video + Image
     if (data.twisted) {
-        appendPromptButtons(container, data.twisted, data.original, platform);
+        // Pass carousel count if we downloaded carousel items earlier
+        const carouselCount = window._lastCarouselCount || 0;
+        appendPromptButtons(container, data.twisted, data.original, platform, carouselCount);
     }
 }
 
@@ -307,7 +310,7 @@ function buildVideoPrompt(flippedScript, platform) {
 }
 
 // ── PROMPT BUTTONS (Video + Image) ──────────────────────
-function appendPromptButtons(container, flippedScript, originalCaption, platform) {
+function appendPromptButtons(container, flippedScript, originalCaption, platform, carouselCount) {
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
 
@@ -355,7 +358,7 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
         const existing = container.querySelector('.image-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
-        const prompts = buildImagePrompts(flippedScript, originalCaption, platform);
+        const prompts = buildImagePrompts(flippedScript, originalCaption, platform, carouselCount);
         const div = document.createElement('div');
         div.className = 'result-section image-prompt-section';
         div.style.borderLeftColor = '#c2185b';
@@ -400,73 +403,94 @@ function guessTopic(text) {
 }
 
 // ── IMAGE PROMPT BUILDER ────────────────────────────────
-function buildImagePrompts(flippedScript, originalCaption, platform) {
+function buildImagePrompts(flippedScript, originalCaption, platform, carouselCount) {
     const script = (flippedScript || '').trim();
-    const original = (originalCaption || '').trim();
     const lower = script.toLowerCase();
 
     // Detect content type for styling
     let style, mood, setting;
     if (/fitness|workout|gym|health|body|muscle/.test(lower)) {
-        style = 'fitness lifestyle photography';
-        mood = 'energetic, powerful, motivated';
-        setting = 'modern gym or outdoor fitness space, golden hour lighting';
+        style = 'fitness lifestyle photography'; mood = 'energetic, powerful, motivated'; setting = 'modern gym or outdoor fitness space, golden hour lighting';
     } else if (/food|recipe|cook|kitchen|meal|eat/.test(lower)) {
-        style = 'professional food photography';
-        mood = 'warm, appetizing, cozy';
-        setting = 'rustic kitchen counter or marble table, soft natural window light';
+        style = 'professional food photography'; mood = 'warm, appetizing, cozy'; setting = 'rustic kitchen counter or marble table, soft natural window light';
     } else if (/travel|trip|adventure|explore|beach|mountain/.test(lower)) {
-        style = 'travel photography';
-        mood = 'wanderlust, freedom, epic';
-        setting = 'breathtaking landscape, vibrant colors, cinematic composition';
+        style = 'travel photography'; mood = 'wanderlust, freedom, epic'; setting = 'breathtaking landscape, vibrant colors, cinematic composition';
     } else if (/business|entrepreneur|startup|money|income|hustle/.test(lower)) {
-        style = 'professional business photography';
-        mood = 'confident, sleek, aspirational';
-        setting = 'modern workspace or luxury office, clean minimal aesthetic';
+        style = 'professional business photography'; mood = 'confident, sleek, aspirational'; setting = 'modern workspace or luxury office, clean minimal aesthetic';
     } else if (/beauty|skincare|makeup|glow|skin/.test(lower)) {
-        style = 'beauty editorial photography';
-        mood = 'glowing, elegant, fresh';
-        setting = 'soft diffused lighting, clean pastel background, dewy skin texture';
+        style = 'beauty editorial photography'; mood = 'glowing, elegant, fresh'; setting = 'soft diffused lighting, clean pastel background, dewy skin texture';
     } else if (/fashion|outfit|style|wear|look/.test(lower)) {
-        style = 'fashion editorial photography';
-        mood = 'trendy, bold, curated';
-        setting = 'urban street or minimalist studio, dramatic lighting';
+        style = 'fashion editorial photography'; mood = 'trendy, bold, curated'; setting = 'urban street or minimalist studio, dramatic lighting';
     } else if (/mindset|motivation|success|growth|manifest/.test(lower)) {
-        style = 'inspirational lifestyle photography';
-        mood = 'calm, focused, powerful';
-        setting = 'minimalist space with warm tones, sunrise or golden hour light';
+        style = 'inspirational lifestyle photography'; mood = 'calm, focused, powerful'; setting = 'minimalist space with warm tones, sunrise or golden hour light';
     } else if (/tech|app|software|ai|digital|code/.test(lower)) {
-        style = 'tech product photography';
-        mood = 'futuristic, clean, innovative';
-        setting = 'dark sleek desk setup, neon accent lights, shallow depth of field';
+        style = 'tech product photography'; mood = 'futuristic, clean, innovative'; setting = 'dark sleek desk setup, neon accent lights, shallow depth of field';
     } else if (/home|interior|decor|design|room|space/.test(lower)) {
-        style = 'interior design photography';
-        mood = 'warm, inviting, aesthetic';
-        setting = 'beautifully styled room, natural light through windows, earth tones';
+        style = 'interior design photography'; mood = 'warm, inviting, aesthetic'; setting = 'beautifully styled room, natural light through windows, earth tones';
     } else {
-        style = 'social media content photography';
-        mood = 'engaging, authentic, scroll-stopping';
-        setting = 'aesthetically pleasing environment, natural lighting, warm tones';
+        style = 'social media content photography'; mood = 'engaging, authentic, scroll-stopping'; setting = 'aesthetically pleasing environment, natural lighting, warm tones';
     }
 
-    // Extract key topic
     const topic = guessTopic(stripHashtags(script));
+    const sentences = script.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length > 5);
 
-    // Build 3 different prompts
-    return [
+    // Determine how many slides to generate
+    const slideCount = Math.max(carouselCount || 0, 6);
+
+    // Slide templates — each slide gets a unique angle/composition
+    const slideTemplates = [
         {
-            label: '\u{1F4F8} Carousel Cover / Hero Image',
-            prompt: `Create a ${style} image for a social media post about "${topic}". ${setting}. Mood: ${mood}. The composition should be Instagram-ready (4:5 aspect ratio), with space for bold text overlay at the top. Subject is centered and visually striking. Shot on Sony A7IV, 35mm f/1.4, natural light. High resolution, editorial quality. --ar 4:5 --style raw --v 6.1`
+            label: '\u{1F4F8} Slide 1 — Hook / Cover',
+            build: () => `Dramatic, scroll-stopping ${style} image for a carousel cover about "${topic}". ${setting}. Bold composition with space for large text overlay at top. Subject centered, hero shot. Mood: ${mood}. Shot on Sony A7IV, 35mm f/1.4. --ar 4:5 --style raw --v 6.1`
         },
         {
-            label: '\u{1F3A8} Carousel Slide / Supporting Image',
-            prompt: `Minimalist infographic-style image for a social media carousel slide about "${topic}". Light cream background (#faf8f5), clean typography area on the right side. Left side shows a ${style.replace('photography','')} visual element related to the topic. Soft shadows, modern design, warm color palette with teal (#0d6e66) and coral (#e8734a) accents. Flat lay or isometric angle. 4:5 aspect ratio. --ar 4:5 --style raw --v 6.1`
+            label: '\u{1F4A1} Slide 2 — The Problem',
+            build: () => `${style} image showing the "problem" or "before" state related to "${topic}". ${setting}. Slightly desaturated or moody tones to convey frustration or confusion. Clean composition with text space on the right. 4:5 aspect ratio. --ar 4:5 --style raw --v 6.1`
         },
         {
-            label: '\u{1F525} Scroll-Stopping Hook Image',
-            prompt: `Dramatic, attention-grabbing ${style} image that visualizes this concept: "${script.split(/[.!?\n]/)[0] || topic}". Ultra close-up or wide cinematic shot, ${mood} mood. Bold contrast, ${setting}. The image should make someone stop scrolling — use unusual angles, vivid colors, or visual tension. Vertical format 9:16 for Reels/TikTok. Shot on cinema camera, anamorphic lens. --ar 9:16 --style raw --v 6.1`
+            label: '\u{2728} Slide 3 — Key Insight',
+            build: () => `Clean, bright ${style} image representing a key insight or "aha moment" about "${topic}". ${setting}. Overhead flat lay or close-up detail shot. Warm highlights, ${mood} mood. Minimalist composition with space for text overlay. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F4CA} Slide 4 — Data / Proof',
+            build: () => `Infographic-style ${style} image for a carousel slide about "${topic}". Light cream background (#faf8f5), teal (#0d6e66) and coral (#e8734a) accent colors. Left side: visual element. Right side: clean space for stats/text. Modern flat design, soft shadows. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F527} Slide 5 — How-To / Steps',
+            build: () => `Step-by-step visual for "${topic}". ${style}, tutorial angle — overhead or over-the-shoulder. ${setting}. Show hands or tools in action. Clean numbered layout space. Mood: ${mood}. Bright, well-lit, instructional feel. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F525} Slide 6 — Result / Transformation',
+            build: () => `Aspirational "after" or result image for "${topic}". ${style}. ${setting}. Vibrant, high-contrast, ${mood} mood. Subject looks confident/successful. Golden hour lighting, cinematic depth of field. Space for bold CTA text at bottom. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F3AF} Slide 7 — CTA / Save This',
+            build: () => `Bold call-to-action slide design for "${topic}". Solid gradient background (teal #0d6e66 to coral #e8734a). Clean center space for large CTA text like "Save This" or "Follow for More". Minimal, modern, high contrast. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F4F1} Slide 8 — Behind the Scenes',
+            build: () => `Authentic behind-the-scenes ${style} image related to "${topic}". ${setting}. Candid, raw, slightly imperfect. Natural light, shallow depth of field. Shows the real process. Mood: genuine, relatable. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F30D} Slide 9 — Lifestyle Context',
+            build: () => `Wide lifestyle ${style} shot showing "${topic}" in a real-world context. ${setting}. Environmental portrait or establishing shot. Cinematic composition, leading lines. ${mood} mood. --ar 4:5 --style raw --v 6.1`
+        },
+        {
+            label: '\u{1F48E} Slide 10 — Premium Detail',
+            build: () => `Ultra close-up macro ${style} shot highlighting a premium detail related to "${topic}". ${setting}. Shallow depth of field, bokeh background. Texture-rich, ${mood} mood. Editorial quality. --ar 4:5 --style raw --v 6.1`
         }
     ];
+
+    // Generate prompts for the exact number of slides
+    const prompts = [];
+    for (let i = 0; i < slideCount && i < slideTemplates.length; i++) {
+        prompts.push({
+            label: slideTemplates[i].label,
+            prompt: slideTemplates[i].build()
+        });
+    }
+
+    return prompts;
 }
 
 function appendVideoPromptSection(container, flippedScript, platform) {
