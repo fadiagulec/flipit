@@ -1,11 +1,10 @@
 // Netlify function: /download
-// Multi-strategy media download with self-hosted Cobalt on Railway
-// Priority: Cobalt (YouTube, Reddit, Pinterest, etc) → Twitter API → OG meta → Save instructions
+// TikTok/YouTube -> Railway yt-dlp (base64), Twitter/X -> syndication API,
+// Instagram -> embed scrape + downloader links, others -> Cobalt/Microlink/OG
 
 const fetch = require('node-fetch');
-
-// Your self-hosted Cobalt instance on Railway
-const COBALT_URL = 'https://cobalt-api-production-4129.up.railway.app/';
+const COBALT_URL  = 'https://cobalt-api-production-4129.up.railway.app/';
+const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
 
 exports.handler = async (event) => {
   const headers = {
@@ -13,14 +12,8 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json'
   };
-
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
-
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-  }
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
   let url;
   try {
@@ -29,76 +22,79 @@ exports.handler = async (event) => {
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
-
-  if (!url) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing url parameter' }) };
-  }
+  if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing url parameter' }) };
 
   const platform = detectPlatform(url);
 
-  // Strategy 1: Cobalt API (self-hosted) — works for YouTube, Reddit, Pinterest, Vimeo, etc.
-  try {
-    const result = await tryCobalt(url);
-    if (result) {
-      return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
-    }
-  } catch (e) {
-    console.log('Cobalt failed:', e.message);
+  // 1. TikTok + YouTube: Railway yt-dlp returns base64 video
+  if (platform === 'tiktok' || platform === 'youtube') {
+    try {
+      const result = await tryRailway(url);
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
+    } catch (e) { console.log('Railway failed:', e.message); }
   }
 
-  // Strategy 2: Twitter syndication API — videos + images + carousels
+  // 2. Twitter/X: syndication API
   if (platform === 'x') {
     try {
       const result = await tryTwitter(url);
-      if (result) {
-        return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'twitter', platform }) };
-      }
-    } catch (e) {
-      console.log('Twitter failed:', e.message);
-    }
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'twitter', platform }) };
+    } catch (e) { console.log('Twitter failed:', e.message); }
   }
 
-  // Strategy 3: Microlink — good for images and some videos
+  // 3. Cobalt for non-Instagram platforms
+  if (platform !== 'instagram') {
+    try {
+      const result = await tryCobalt(url);
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
+    } catch (e) { console.log('Cobalt failed:', e.message); }
+  }
+
+  // 4. Instagram: embed scrape attempt, then helpful downloader links
+  if (platform === 'instagram') {
+    try {
+      const result = await tryInstagramEmbed(url);
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'ig-embed', platform }) };
+    } catch (e) { console.log('Instagram embed failed:', e.message); }
+    return {
+      statusCode: 200, headers,
+      body: JSON.stringify({
+        downloadUrl: null, openUrl: url, platform, source: 'manual',
+        instruction: 'Instagram blocks server downloads. Open in the app, tap ... then Save.',
+        downloaders: [
+          { name: 'SnapInsta', url: 'https://snapinsta.app' },
+          { name: 'SaveFrom', url: 'https://savefrom.net' },
+          { name: 'iGram', url: 'https://igram.world' }
+        ]
+      })
+    };
+  }
+
+  // 5. Microlink fallback
   try {
     const result = await tryMicrolink(url);
-    if (result) {
-      return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'microlink', platform }) };
-    }
-  } catch (e) {
-    console.log('Microlink failed:', e.message);
-  }
+    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'microlink', platform }) };
+  } catch (e) { console.log('Microlink failed:', e.message); }
 
-  // Strategy 4: OG meta tags
+  // 6. OG meta tags
   try {
     const result = await tryOgMeta(url);
-    if (result) {
-      return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'og-meta', platform }) };
-    }
-  } catch (e) {
-    console.log('OG meta failed:', e.message);
-  }
+    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'og-meta', platform }) };
+  } catch (e) { console.log('OG meta failed:', e.message); }
 
-  // Fallback: save instructions
+  // 7. Generic fallback
   const instructions = {
-    instagram: 'Open in Instagram app → tap ••• → Save. For carousels, swipe to each image and screenshot or "Save to Collection".',
-    tiktok: 'Open in TikTok app → tap Share → "Save video". For photos, long-press → Save.',
-    youtube: 'Use YouTube app download button (Premium) or save to Watch Later.',
-    x: 'Open in X → tap image to fullscreen → long-press → "Save image". For videos, tap Share → Bookmark.',
-    facebook: 'Open in Facebook app → tap ••• → Save video/photo.',
-    linkedin: 'Open in LinkedIn → tap ••• → Save.',
-    threads: 'Open in Threads → tap Share → Save.'
+    tiktok: 'Open in TikTok app, tap Share, Save video.',
+    youtube: 'Use YouTube Premium download or save to Watch Later.',
+    x: 'Open in X, long-press image, Save image.',
+    facebook: 'Open in Facebook app, tap ..., Save.',
+    linkedin: 'Open in LinkedIn, tap ..., Save.',
+    threads: 'Open in Threads, tap Share, Save.',
+    other: 'Open the post and use the built-in save option.'
   };
-
   return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({
-      downloadUrl: null,
-      openUrl: url,
-      platform,
-      instruction: instructions[platform] || 'Open the post and use the built-in save option.',
-      source: 'manual'
-    })
+    statusCode: 200, headers,
+    body: JSON.stringify({ downloadUrl: null, openUrl: url, platform, source: 'manual', instruction: instructions[platform] || instructions.other })
   };
 };
 
@@ -113,222 +109,170 @@ function detectPlatform(url) {
   return 'other';
 }
 
-// ── Cobalt API (self-hosted on Railway) ─────────────────────
+async function tryRailway(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch(RAILWAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: controller.signal
+    });
+    const data = await res.json();
+    if (!data.success || !data.videoData) return null;
+    const estimatedBytes = (data.videoData.length * 3) / 4;
+    if (estimatedBytes > 5.5 * 1024 * 1024) return null; // Netlify 6MB cap
+    return {
+      videoData: data.videoData,
+      ext: data.ext || '.mp4',
+      type: 'video',
+      filename: 'flipit-video' + (data.ext || '.mp4')
+    };
+  } finally { clearTimeout(timeout); }
+}
+
 async function tryCobalt(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
-
   try {
     const res = await fetch(COBALT_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ url, videoQuality: 'max', filenameStyle: 'basic' }),
       signal: controller.signal
     });
-
     const data = await res.json();
-
-    // Cobalt v11 "tunnel" response — returns a proxied download URL
-    if (data.status === 'tunnel' && data.url) {
+    if ((data.status === 'tunnel' || data.status === 'redirect' || data.status === 'stream') && data.url) {
       return {
         downloadUrl: data.url,
         filename: data.filename || null,
-        type: data.filename && data.filename.match(/\.(jpg|png|webp)/i) ? 'image' : 'video'
+        type: data.filename && /\.(jpg|png|webp)/i.test(data.filename) ? 'image' : 'video'
       };
     }
-
-    // Cobalt "redirect" response — direct URL
-    if (data.status === 'redirect' && data.url) {
-      return {
-        downloadUrl: data.url,
-        filename: data.filename || null,
-        type: data.filename && data.filename.match(/\.(jpg|png|webp)/i) ? 'image' : 'video'
-      };
-    }
-
-    // Cobalt "stream" response
-    if (data.status === 'stream' && data.url) {
-      return {
-        downloadUrl: data.url,
-        filename: data.filename || null,
-        type: 'video'
-      };
-    }
-
-    // Cobalt "picker" response — carousel/multiple items
     if (data.status === 'picker' && data.picker && data.picker.length > 0) {
       const items = data.picker.map(p => ({
         url: p.url,
-        type: p.type || (p.url.match(/\.(jpg|png|webp)/i) ? 'image' : 'video'),
+        type: p.type || (/\.(jpg|png|webp)/i.test(p.url) ? 'image' : 'video'),
         thumb: p.thumb || null
       }));
-
-      return {
-        downloadUrl: items[0].url,
-        carousel: items,
-        filename: data.filename || null,
-        type: items[0].type,
-        mediaCount: items.length
-      };
+      return { downloadUrl: items[0].url, carousel: items, filename: data.filename || null, type: items[0].type, mediaCount: items.length };
     }
-
-    // Error responses
-    if (data.status === 'error') {
-      console.log('Cobalt error:', data.error?.code || 'unknown');
-      return null;
-    }
-
     return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  } finally { clearTimeout(timeout); }
 }
 
-// ── Twitter syndication: videos + images + carousels ────────
 async function tryTwitter(url) {
   const match = url.match(/status\/(\d+)/);
   if (!match) return null;
-
   const tweetId = match[1];
-  const endpoints = [
-    `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=x`,
-    `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=a`
-  ];
-
-  for (const endpoint of endpoints) {
+  for (const token of ['x', 'a']) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
-
-      const res = await fetch(endpoint, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        signal: controller.signal
+      const res = await fetch('https://cdn.syndication.twimg.com/tweet-result?id=' + tweetId + '&lang=en&token=' + token, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal
       });
       clearTimeout(timeout);
-
       const text = await res.text();
       if (!text || text.startsWith('<!')) continue;
-
       const data = JSON.parse(text);
-
-      if (data.mediaDetails && data.mediaDetails.length > 0) {
-        if (data.mediaDetails.length > 1) {
-          const images = [];
-          for (const media of data.mediaDetails) {
-            if (media.video_info && media.video_info.variants) {
-              const mp4s = media.video_info.variants
-                .filter(v => v.content_type === 'video/mp4')
-                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-              if (mp4s.length > 0) images.push({ url: mp4s[0].url, type: 'video' });
-            } else if (media.media_url_https) {
-              images.push({ url: media.media_url_https + '?name=large', type: 'image' });
-            }
+      const mediaList = data.mediaDetails || [];
+      if (mediaList.length > 0) {
+        const items = mediaList.map(m => {
+          if (m.video_info && m.video_info.variants) {
+            const best = m.video_info.variants.filter(v => v.content_type === 'video/mp4').sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+            return best ? { url: best.url, type: 'video' } : null;
           }
-          if (images.length > 0) {
-            return { downloadUrl: images[0].url, carousel: images, filename: `twitter_${tweetId}`, type: images[0].type, mediaCount: images.length };
-          }
-        }
-
-        const media = data.mediaDetails[0];
-        if (media.video_info && media.video_info.variants) {
-          const mp4s = media.video_info.variants.filter(v => v.content_type === 'video/mp4').sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-          if (mp4s.length > 0) return { downloadUrl: mp4s[0].url, filename: `twitter_${tweetId}.mp4`, type: 'video' };
-        }
-        if (media.media_url_https) {
-          return { downloadUrl: media.media_url_https + '?name=large', filename: `twitter_${tweetId}.jpg`, type: 'image' };
-        }
+          if (m.media_url_https) return { url: m.media_url_https + '?name=large', type: 'image' };
+          return null;
+        }).filter(Boolean);
+        if (items.length > 1) return { downloadUrl: items[0].url, carousel: items, type: items[0].type, mediaCount: items.length, filename: 'tweet_' + tweetId };
+        if (items.length === 1) return { downloadUrl: items[0].url, type: items[0].type, filename: 'tweet_' + tweetId + (items[0].type === 'video' ? '.mp4' : '.jpg') };
       }
-
       if (data.photos && data.photos.length > 0) {
-        if (data.photos.length > 1) {
-          const images = data.photos.map(p => ({ url: p.url + '?name=large', type: 'image' }));
-          return { downloadUrl: images[0].url, carousel: images, filename: `twitter_${tweetId}`, type: 'image', mediaCount: images.length };
-        }
-        return { downloadUrl: data.photos[0].url + '?name=large', filename: `twitter_${tweetId}.jpg`, type: 'image' };
+        const items = data.photos.map(p => ({ url: p.url + '?name=large', type: 'image' }));
+        if (items.length === 1) return { downloadUrl: items[0].url, type: 'image', filename: 'tweet_' + tweetId + '.jpg' };
+        return { downloadUrl: items[0].url, carousel: items, type: 'image', mediaCount: items.length, filename: 'tweet_' + tweetId };
       }
-    } catch (e) {
-      continue;
-    }
+    } catch (e) { continue; }
   }
   return null;
 }
 
-// ── Microlink API ───────────────────────────────────────────
+async function tryInstagramEmbed(url) {
+  const scMatch = url.match(/(?:reel|p|tv)\/([A-Za-z0-9_-]+)/);
+  if (!scMatch) return null;
+  const sc = scMatch[1];
+  const embedUrl = 'https://www.instagram.com/p/' + sc + '/embed/captioned/';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Dest': 'iframe',
+        'Referer': 'https://www.instagram.com/'
+      },
+      redirect: 'follow', signal: controller.signal
+    });
+    clearTimeout(timeout);
+    const html = await res.text();
+    const videoPatterns = [/"video_url":"([^"]+)"/, /"contentUrl":"([^"]+)"/];
+    for (const p of videoPatterns) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http')) {
+        return { downloadUrl: m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''), type: 'video', filename: 'instagram_' + sc + '.mp4' };
+      }
+    }
+    const imgPatterns = [/"display_url":"([^"]+)"/, /property="og:image"\s+content="([^"]+)"/];
+    for (const p of imgPatterns) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http') && !m[1].includes('150x150')) {
+        return { downloadUrl: m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''), type: 'image', filename: 'instagram_' + sc + '.jpg' };
+      }
+    }
+  } catch (e) { clearTimeout(timeout); }
+  return null;
+}
+
 async function tryMicrolink(url) {
-  const apiUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&video=true`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
-
   try {
-    const res = await fetch(apiUrl, { signal: controller.signal });
+    const res = await fetch('https://api.microlink.io?url=' + encodeURIComponent(url) + '&video=true', { signal: controller.signal });
     const data = await res.json();
-
     if (data.status === 'success' && data.data) {
-      if (data.data.video && data.data.video.url) {
-        return { downloadUrl: data.data.video.url, filename: null, type: 'video' };
-      }
-      if (data.data.image && data.data.image.url && !data.data.image.url.startsWith('data:') && data.data.image.url.startsWith('http')) {
-        const w = data.data.image.width || 999;
-        const h = data.data.image.height || 999;
-        if (w > 200 && h > 200) {
-          return { downloadUrl: data.data.image.url, filename: null, type: 'image' };
-        }
+      if (data.data.video && data.data.video.url) return { downloadUrl: data.data.video.url, type: 'video', filename: null };
+      if (data.data.image && data.data.image.url && data.data.image.url.startsWith('http') && data.data.image.width > 200 && data.data.image.height > 200) {
+        return { downloadUrl: data.data.image.url, type: 'image', filename: null };
       }
     }
-  } finally {
-    clearTimeout(timeout);
-  }
+  } finally { clearTimeout(timeout); }
   return null;
 }
 
-// ── OG meta tags ────────────────────────────────────────────
 async function tryOgMeta(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
-
   try {
     const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-        'Accept': 'text/html'
-      },
-      redirect: 'follow',
-      signal: controller.signal
+      headers: { 'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)', 'Accept': 'text/html' },
+      redirect: 'follow', signal: controller.signal
     });
-
     const html = await res.text();
-
-    const videoPatterns = [
-      /property="og:video:secure_url"\s+content="([^"]+)"/,
-      /content="([^"]+)"\s+property="og:video:secure_url"/,
-      /property="og:video"\s+content="([^"]+)"/,
-      /content="([^"]+)"\s+property="og:video"/
-    ];
-
-    for (const pattern of videoPatterns) {
-      const m = html.match(pattern);
-      if (m && m[1] && m[1].startsWith('http') && !m[1].includes('embed')) {
-        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'video.mp4', type: 'video' };
-      }
+    const videoP = [/property="og:video:secure_url"\s+content="([^"]+)"/, /property="og:video"\s+content="([^"]+)"/];
+    for (const p of videoP) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http') && !m[1].includes('embed')) return { downloadUrl: m[1].replace(/&amp;/g, '&'), type: 'video', filename: 'video.mp4' };
     }
-
-    const imagePatterns = [
-      /property="og:image"\s+content="([^"]+)"/,
-      /content="([^"]+)"\s+property="og:image"/,
-      /name="twitter:image"\s+content="([^"]+)"/
-    ];
-
-    for (const pattern of imagePatterns) {
-      const m = html.match(pattern);
-      if (m && m[1] && m[1].startsWith('http') && !m[1].startsWith('data:')) {
-        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'image.jpg', type: 'image' };
-      }
+    const imgP = [/property="og:image"\s+content="([^"]+)"/, /name="twitter:image"\s+content="([^"]+)"/];
+    for (const p of imgP) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http')) return { downloadUrl: m[1].replace(/&amp;/g, '&'), type: 'image', filename: 'image.jpg' };
     }
-  } finally {
-    clearTimeout(timeout);
-  }
+  } finally { clearTimeout(timeout); }
   return null;
 }
