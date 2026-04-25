@@ -123,7 +123,8 @@ async function handleDownload() {
 
         showSuccess('✅ Download started!', 'errorMessage');
     } catch (err) {
-        showError(`Download error: ${err.message}`, 'errorMessage');
+        console.error('Download error:', err);
+        showError('Download failed. Try using the Extract & Flip button instead.', 'errorMessage');
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -147,7 +148,7 @@ function downloadBase64(base64Data, filename, mimeType = 'application/octet-stre
     } catch (e) { console.error('Download error:', e); }
 }
 
-// ── EXTRACT & FLIP ────────────────────────────────────────
+// ── EXTRACT & FLIP ─────────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -177,7 +178,8 @@ async function handleExtractAndTwist() {
         const data = await res.json();
         displayResults(data, platform);
     } catch (err) {
-        showError(`Error: ${err.message}`, 'errorMessage');
+        console.error('Extract error:', err);
+        showError('Something went wrong. Please try again.', 'errorMessage');
         container.innerHTML = '';
     } finally {
         btn.disabled = false;
@@ -257,7 +259,8 @@ async function handleRewriteScript() {
         appendSection(container, '✨ Flipped Version', data.twisted, true);
         if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
     } catch (err) {
-        showError(`Error: ${err.message}`, 'scriptErrorMessage');
+        console.error('Rewrite error:', err);
+        showError('Something went wrong. Please try again.', 'scriptErrorMessage');
         container.innerHTML = '';
     } finally {
         btn.disabled = false;
@@ -308,7 +311,8 @@ Number each idea clearly (1, 2, 3). Make them specific and actionable — not ge
         appendSection(container, '💡 Your 3 Viral Script Ideas', data.twisted, true);
         if (data.prompt) appendSection(container, '🎯 Pro Tips', data.prompt, true);
     } catch (err) {
-        showError(`Error: ${err.message}`, 'ideasErrorMessage');
+        console.error('Ideas error:', err);
+        showError('Something went wrong. Please try again.', 'ideasErrorMessage');
         container.innerHTML = '';
     } finally {
         btn.disabled = false;
@@ -415,7 +419,8 @@ Make each prompt unique — vary the setting, angle, mood, and composition.`;
         appendSection(container, title, data.twisted, true);
         if (data.prompt) appendSection(container, '🎯 Posting Tips', data.prompt, true);
     } catch (err) {
-        showError(`Error: ${err.message}`, 'imgErrorMessage');
+        console.error('Image prompts error:', err);
+        showError('Something went wrong. Please try again.', 'imgErrorMessage');
         container.innerHTML = '';
     } finally {
         btn.disabled = false;
