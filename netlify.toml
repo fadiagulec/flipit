@@ -30,5 +30,5 @@
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src https://www.instagram.com https://www.youtube.com https://www.tiktok.com https://www.facebook.com https://platform.twitter.com; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src https://www.instagram.com https://www.youtube.com https://www.tiktok.com https://www.facebook.com https://platform.twitter.com https://player.vimeo.com; frame-ancestors 'none'"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
