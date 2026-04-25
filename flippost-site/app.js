@@ -83,110 +83,111 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ── VIDEO EMBED ───────────────────────────────────────────
-function getEmbedHtml(url, platform) {
-    try {
-        switch (platform) {
-            case 'instagram': {
-                const match = url.match(/\/(reel|p|tv)\/([A-Za-z0-9_-]+)/);
-                if (match) {
-                    return `<iframe src="https://www.instagram.com/${match[1]}/${match[2]}/embed/" width="100%" height="550" frameborder="0" scrolling="no" allowtransparency="true" allowfullscreen loading="lazy"></iframe>`;
-                }
-                break;
-            }
-            case 'youtube': {
-                let videoId = null;
-                if (url.includes('youtu.be/')) {
-                    videoId = url.split('youtu.be/')[1]?.split(/[?&#]/)[0];
-                } else if (url.includes('/shorts/')) {
-                    videoId = url.split('/shorts/')[1]?.split(/[?&#]/)[0];
-                } else {
-                    const match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-                    videoId = match?.[1];
-                }
-                if (videoId) {
-                    return `<iframe src="https://www.youtube.com/embed/${videoId}" width="100%" height="400" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
-                }
-                break;
-            }
-            case 'tiktok': {
-                const match = url.match(/\/video\/(\d+)/) || url.match(/\/(\d{15,})/);
-                if (match) {
-                    return `<iframe src="https://www.tiktok.com/embed/v2/${match[1]}" width="100%" height="600" frameborder="0" allowfullscreen loading="lazy"></iframe>`;
-                }
-                break;
-            }
-            case 'facebook': {
-                const encoded = encodeURIComponent(url);
-                return `<iframe src="https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=false&width=476" width="100%" height="400" frameborder="0" allowfullscreen loading="lazy"></iframe>`;
-            }
-            case 'vimeo': {
-                const match = url.match(/vimeo\.com\/(\d+)/);
-                if (match) {
-                    return `<iframe src="https://player.vimeo.com/video/${match[1]}?badge=0&autopause=0" width="100%" height="400" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
-                }
-                break;
-            }
-            case 'mp4': {
-                return `<video controls width="100%" style="max-height:500px; border-radius:8px;"><source src="${escapeHtml(url)}" type="video/mp4">Your browser does not support the video tag.</video>`;
-            }
-        }
-    } catch (e) {
-        console.error('Embed generation error:', e);
-    }
+// ── VIDEO PLAYER (rebuilt from scratch) ───────────────────
+
+// STEP 1: Detect video type from URL
+function detectVideoType(url) {
+    if (!url || typeof url !== 'string') return null;
+    try { new URL(url); } catch { return null; }
+
+    if (/youtube\.com\/watch/i.test(url)) return 'youtube';
+    if (/youtu\.be\//i.test(url)) return 'youtube';
+    if (/youtube\.com\/shorts\//i.test(url)) return 'youtube';
+    if (/vimeo\.com\/\d+/i.test(url)) return 'vimeo';
+    if (/\.(mp4|webm)(\?|#|$)/i.test(url)) return 'direct';
+
     return null;
 }
 
-function renderVideoEmbed(container, url, platform) {
-    const embedHtml = getEmbedHtml(url, platform);
+// STEP 2: Convert URLs to embed format
+function getVideoEmbedUrl(url, type) {
+    if (!url || !type) return null;
+
+    switch (type) {
+        case 'youtube': {
+            let videoId = null;
+            if (url.includes('youtu.be/')) {
+                videoId = url.split('youtu.be/')[1]?.split(/[?&#]/)[0];
+            } else if (url.includes('/shorts/')) {
+                videoId = url.split('/shorts/')[1]?.split(/[?&#]/)[0];
+            } else {
+                const match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+                videoId = match?.[1];
+            }
+            if (videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+                return 'https://www.youtube.com/embed/' + videoId;
+            }
+            return null;
+        }
+        case 'vimeo': {
+            const match = url.match(/vimeo\.com\/(\d+)/);
+            if (match) {
+                return 'https://player.vimeo.com/video/' + match[1];
+            }
+            return null;
+        }
+        case 'direct':
+            return url;
+        default:
+            return null;
+    }
+}
+
+// STEP 3: Render the player into a container
+function renderVideoPlayer(container, url) {
+    const type = detectVideoType(url);
+    const embedUrl = getVideoEmbedUrl(url, type);
+
+    // STEP 5: Debug logs
+    console.log('[FlipIt Video] Original URL:', url);
+    console.log('[FlipIt Video] Detected type:', type);
+    console.log('[FlipIt Video] Embed URL:', embedUrl);
 
     const section = document.createElement('div');
     section.className = 'video-embed-section';
-    section.innerHTML = `<h3>${platformEmojis[platform] || '🎬'} Video Preview</h3>`;
+    section.innerHTML = '<h3>🎬 Video Preview</h3>';
 
     const wrapper = document.createElement('div');
     wrapper.className = 'video-embed-wrapper';
 
-    if (embedHtml) {
-        wrapper.innerHTML = embedHtml;
+    // STEP 4: Validate — don't render broken URLs
+    if (!type || !embedUrl) {
+        console.log('[FlipIt Video] Invalid or unsupported video URL');
+        wrapper.innerHTML = `<div class="video-embed-fallback">
+            <p style="font-size:40px; margin-bottom:10px;">🎬</p>
+            <p style="color:#888; font-size:16px;">Invalid video link — could not detect video type.</p>
+            <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open link directly ↗</a>
+        </div>`;
+        section.appendChild(wrapper);
+        container.prepend(section);
+        return;
+    }
 
-        const iframe = wrapper.querySelector('iframe');
-        if (iframe) {
-            iframe.onerror = function () {
-                wrapper.innerHTML = getFallbackHtml(url, platform);
-            };
-            setTimeout(() => {
-                try {
-                    if (!wrapper.querySelector('iframe') && !wrapper.querySelector('video')) {
-                        wrapper.innerHTML = getFallbackHtml(url, platform);
-                    }
-                } catch (e) { /* ignore */ }
-            }, 8000);
-        }
+    // Render iframe (YouTube/Vimeo) or <video> (MP4/WebM)
+    if (type === 'direct') {
+        const ext = url.match(/\.(mp4|webm)/i)?.[1] || 'mp4';
+        wrapper.innerHTML = `<video controls width="100%" style="max-height:500px; border-radius:8px;">
+            <source src="${escapeHtml(embedUrl)}" type="video/${ext}">
+            Your browser does not support the video tag.
+        </video>`;
+        console.log('[FlipIt Video] Rendered <video> tag for', ext);
     } else {
-        wrapper.innerHTML = getFallbackHtml(url, platform);
+        wrapper.innerHTML = `<iframe
+            src="${escapeHtml(embedUrl)}"
+            width="100%"
+            height="400"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+            loading="lazy"
+        ></iframe>`;
+        console.log('[FlipIt Video] Rendered iframe for', type);
     }
 
     section.appendChild(wrapper);
-
-    const hint = document.createElement('div');
-    hint.className = 'embed-hint';
-    hint.textContent = 'If the video doesn\'t load, click the link below to view it directly.';
-    section.appendChild(hint);
-
     container.prepend(section);
 }
-
-function getFallbackHtml(url, platform) {
-    const name = platform.charAt(0).toUpperCase() + platform.slice(1);
-    return `<div class="video-embed-fallback">
-        <p style="font-size:40px; margin-bottom:10px;">${platformEmojis[platform] || '🎬'}</p>
-        <p style="color:#888; font-size:16px;">Could not embed this ${name} video directly.</p>
-        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open on ${name} ↗</a>
-    </div>`;
-}
-
-// ── DOWNLOAD ──────────────────────────────────────────────
+// ── DOWNLOAD ──────────────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
 async function handleDownload() {
@@ -196,6 +197,7 @@ async function handleDownload() {
     const platform = detectPlatform(url);
     if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
 
+    // LinkedIn download warning
     if (platform === 'linkedin') {
         showError('LinkedIn posts cannot be downloaded directly due to LinkedIn restrictions. Try using Extract & Flip instead to get the text content.', 'errorMessage');
         return;
@@ -254,7 +256,7 @@ function downloadBase64(base64Data, filename, mimeType = 'application/octet-stre
     } catch (e) { console.error('Download error:', e); }
 }
 
-// ── EXTRACT & FLIP ─────────────────────────────────────────
+// ── EXTRACT & FLIP ─────────────────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -275,13 +277,8 @@ async function handleExtractAndTwist() {
     const container = document.getElementById('resultsContainer');
     container.innerHTML = '';
 
-    // Show video embed FIRST — this works independently of the API
-    const embedHtml = getEmbedHtml(url, platform);
-    console.log('[FlipIt] Embed HTML generated:', !!embedHtml);
-    if (embedHtml) {
-        console.log('[FlipIt] Embed src:', embedHtml.match(/src="([^"]+)"/)?.[1] || 'N/A');
-    }
-    renderVideoEmbed(container, url, platform);
+    // Show video player FIRST — this works independently of the API
+    renderVideoPlayer(container, url);
 
     // Add loading indicator AFTER the embed
     const loadingDiv = document.createElement('div');
@@ -356,6 +353,7 @@ function displayResults(data, platform) {
     const container = document.getElementById('resultsContainer');
     container.innerHTML = '';
 
+    // Carousel images preview
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');
         wrap.className = 'carousel-preview';
@@ -407,7 +405,7 @@ function appendSection(container, title, text, copyable) {
     container.appendChild(div);
 }
 
-// ── SCRIPT REWRITE ─────────────────────────────────────────
+// ── SCRIPT REWRITE ─────────────────────────────────────────────────
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -445,8 +443,7 @@ async function handleRewriteScript() {
         btn.textContent = orig;
     }
 }
-
-// ── NICHE IDEAS ─────────────────────────────────────────────
+// ── NICHE IDEAS ─────────────────────────────────────────────────────
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -467,18 +464,7 @@ async function handleGenerateIdeas() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                script: `You are a viral content strategist. Generate 3 highly specific, ready-to-film viral video script ideas for the niche: ${niche}
-
-Topic/Details: ${description}
-
-For EACH of the 3 ideas, provide:
-1. VIDEO TITLE — a scroll-stopping, curiosity-driven title
-2. HOOK — the exact first 1-2 sentences to say on camera that stops the scroll
-3. SCRIPT OUTLINE — 5-6 bullet points covering what to say, in order
-4. CALL TO ACTION — what to tell viewers at the end
-5. WHY IT WORKS — 1 sentence explaining the psychology behind why this will go viral
-
-Number each idea clearly (1, 2, 3). Make them specific and actionable — not generic. Mix formats: one educational, one storytelling, one trend/controversial take.`
+                script: `You are a viral content strategist. Generate 3 highly specific, ready-to-film viral video script ideas for the niche: ${niche}\n\nTopic/Details: ${description}\n\nFor EACH of the 3 ideas, provide:\n1. VIDEO TITLE — a scroll-stopping, curiosity-driven title\n2. HOOK — the exact first 1-2 sentences to say on camera that stops the scroll\n3. SCRIPT OUTLINE — 5-6 bullet points covering what to say, in order\n4. CALL TO ACTION — what to tell viewers at the end\n5. WHY IT WORKS — 1 sentence explaining the psychology behind why this will go viral\n\nNumber each idea clearly (1, 2, 3). Make them specific and actionable — not generic. Mix formats: one educational, one storytelling, one trend/controversial take.`
             })
         });
 
@@ -498,10 +484,11 @@ Number each idea clearly (1, 2, 3). Make them specific and actionable — not ge
     }
 }
 
-// ── IMAGE PROMPTS ──────────────────────────────────────────
+// ── IMAGE PROMPTS ──────────────────────────────────────────────────
 var selectedImgNiche = 'mommy';
 var selectedEvent = '';
 
+// Niche card selection
 document.querySelectorAll('.niche-card').forEach(card => {
     card.addEventListener('click', () => {
         document.querySelectorAll('.niche-card').forEach(c => c.classList.remove('selected'));
@@ -510,6 +497,7 @@ document.querySelectorAll('.niche-card').forEach(card => {
     });
 });
 
+// Event pill selection
 document.querySelectorAll('.event-pill').forEach(pill => {
     pill.addEventListener('click', () => {
         if (pill.classList.contains('selected')) {
@@ -524,6 +512,7 @@ document.querySelectorAll('.event-pill').forEach(pill => {
     });
 });
 
+// Custom event clears pills
 document.getElementById('imgCustomEvent').addEventListener('input', function() {
     if (this.value.trim()) {
         document.querySelectorAll('.event-pill').forEach(p => p.classList.remove('selected'));
@@ -559,23 +548,7 @@ async function handleGenerateImgPrompts() {
     const container = document.getElementById('imgResultsContainer');
     container.innerHTML = '<div class="loading">📸 Creating your image prompts...</div>';
 
-    const prompt = `You are an expert AI image prompt engineer for social media influencers. Generate exactly ${count} detailed, high-quality image prompts.
-
-Influencer niche: ${nicheDesc}
-Image style: ${style}
-${eventText ? 'Event / vibe / theme: ' + eventText : ''}
-${extra ? 'Additional details: ' + extra : ''}
-
-Rules for each prompt:
-- Write each prompt as a detailed, ready-to-use AI image generation prompt (for Midjourney, DALL-E, or similar)
-- Include specific details: lighting (golden hour, soft natural light, studio), composition (close-up, wide shot, flat lay, overhead), colors, mood, styling details
-- Make prompts Instagram/Pinterest-worthy — aspirational, aesthetic, on-brand
-- Each prompt should be 2-4 sentences of vivid description
-- Number each prompt
-- After each prompt, add a one-line "CAPTION IDEA:" that pairs with the image
-- At the end, add a "POSTING TIPS" section with 3 tips for this niche
-
-Make each prompt unique — vary the setting, angle, mood, and composition.`;
+    const prompt = `You are an expert AI image prompt engineer for social media influencers. Generate exactly ${count} detailed, high-quality image prompts.\n\nInfluencer niche: ${nicheDesc}\nImage style: ${style}\n${eventText ? 'Event / vibe / theme: ' + eventText : ''}\n${extra ? 'Additional details: ' + extra : ''}\n\nRules for each prompt:\n- Write each prompt as a detailed, ready-to-use AI image generation prompt (for Midjourney, DALL-E, or similar)\n- Include specific details: lighting (golden hour, soft natural light, studio), composition (close-up, wide shot, flat lay, overhead), colors, mood, styling details\n- Make prompts Instagram/Pinterest-worthy — aspirational, aesthetic, on-brand\n- Each prompt should be 2-4 sentences of vivid description\n- Number each prompt\n- After each prompt, add a one-line \"CAPTION IDEA:\" that pairs with the image\n- At the end, add a \"POSTING TIPS\" section with 3 tips for this niche\n\nMake each prompt unique — vary the setting, angle, mood, and composition.`;
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -603,7 +576,7 @@ Make each prompt unique — vary the setting, angle, mood, and composition.`;
     }
 }
 
-// ── UTILITIES ───────────────────────────────────────────────
+// ── UTILITIES ───────────────────────────────────────────────────────
 function copyToClipboard(button) {
     const text = button.previousElementSibling.textContent;
     navigator.clipboard.writeText(text).then(() => {
