@@ -82,6 +82,35 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
 // ── DOWNLOAD MEDIA ──────────────────────────────────────
 const DOWNLOAD_URL = '/.netlify/functions/download';
 
+// Force-download a file from URL using fetch + blob + hidden anchor
+async function forceDownload(mediaUrl, filename) {
+    try {
+        const res = await fetch(mediaUrl);
+        if (!res.ok) throw new Error('fetch failed');
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename || 'flipit-media';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+        return true;
+    } catch (e) {
+        // Fallback: hidden anchor with download attribute
+        const a = document.createElement('a');
+        a.href = mediaUrl;
+        a.download = filename || 'flipit-media';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return true;
+    }
+}
+
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
 async function handleDownload() {
@@ -105,8 +134,29 @@ async function handleDownload() {
 
         const data = await res.json();
 
-        if (res.ok && data.downloadUrl) {
-            btn.textContent = '\u2B07\uFE0F Starting download...';
+        if (res.ok && data.videoData) {
+            // Railway yt-dlp returned base64 video — decode and download directly
+            btn.textContent = '⬇️ Downloading...';
+            window._lastCarouselCount = 0;
+            window._lastCarouselUrls = [];
+            try {
+                const byteChars = atob(data.videoData);
+                const byteArr = new Uint8Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+                const blob = new Blob([byteArr], { type: 'video/mp4' });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = data.filename || ('flipit-video' + (data.ext || '.mp4'));
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
+                showSuccess('✅ Video download started!', 'errorMessage');
+            } catch (e) {
+                showError('❌ Could not save video. Try again.', 'errorMessage');
+            }
+
+        } else if (res.ok && data.downloadUrl) {
+            btn.textContent = '\u2B07\uFE0F Downloading...';
 
             // If carousel with multiple images, show download panel
             if (data.carousel && data.carousel.length > 1) {
@@ -117,15 +167,33 @@ async function handleDownload() {
             } else {
                 window._lastCarouselCount = 0;
                 window._lastCarouselUrls = [data.downloadUrl];
-                window.open(data.downloadUrl, '_blank');
+                const ext = data.type === 'video' ? '.mp4' : '.jpg';
+                const fname = data.filename || `flipit-${platform || 'media'}${ext}`;
+                await forceDownload(data.downloadUrl, fname);
                 const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
                 showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
             }
+        } else if (res.ok && data.openUrl && data.downloaders) {
+            // Instagram hard-blocks servers — show friendly helper links
+            const links = data.downloaders.map(d =>
+                '<a href="' + d.url + '" target="_blank" rel="noopener" style="display:inline-block;padding:8px 14px;margin:4px 2px;background:#0d6e66;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">' + d.name + '</a>'
+            ).join('');
+            const msgEl = document.getElementById('errorMessage');
+            if (msgEl) {
+                msgEl.style.display = 'block';
+                msgEl.style.background = '#fff8e1';
+                msgEl.style.border = '1.5px solid #e8c840';
+                msgEl.style.color = '#444';
+                msgEl.style.borderRadius = '12px';
+                msgEl.style.padding = '16px 18px';
+                msgEl.innerHTML = '<strong>📸 Instagram blocks server downloads</strong><br><span style="font-size:13px;">' + data.instruction + '</span><br><br><strong>Free tools that work:</strong><br>' + links + '<br><br><a href="' + data.openUrl + '" target="_blank" rel="noopener" style="color:#0d6e66;font-weight:600;font-size:13px;">↗️ Open post in new tab → save from app</a>';
+            }
+
         } else if (res.ok && data.openUrl) {
             window.open(data.openUrl, '_blank');
-            showSuccess(`\u{1F4F1} ${data.instruction || 'Save the media from the app directly.'}`, 'errorMessage');
+            showSuccess('📱 ' + (data.instruction || 'Save the media from the app directly.'), 'errorMessage');
         } else {
-            showError(`\u274C Could not process this link. Please try again.`, 'errorMessage');
+            showError('❌ Could not process this link. Please try again.', 'errorMessage');
         }
     } catch (err) {
         console.error('Download error:', err);
@@ -139,14 +207,16 @@ async function handleDownload() {
 function showCarouselDownloads(items, platform) {
     const container = document.getElementById('resultsContainer');
 
-    // Download All button
-    const downloadAllBtn = `<button onclick="document.querySelectorAll('.carousel-dl-link').forEach((a,i)=>{setTimeout(()=>window.open(a.href,'_blank'),i*800)})" style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;">\u2B07\uFE0F Download All ${items.length} Items</button>`;
+    // Download All button — uses forceDownload for each item
+    const downloadAllBtn = `<button onclick="(async()=>{const btns=document.querySelectorAll('.carousel-dl-btn');for(let i=0;i<btns.length;i++){btns[i].textContent='\\u23F3...';await forceDownload(btns[i].dataset.url,btns[i].dataset.fname);btns[i].textContent='\\u2705 Done';await new Promise(r=>setTimeout(r,500))}})()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;">\u2B07\uFE0F Download All ${items.length} Items</button>`;
 
-    // Individual buttons
+    // Individual buttons — each triggers forceDownload
     const individualBtns = items.map((item, i) => {
         const icon = item.type === 'video' ? '\u{1F3AC}' : '\u{1F5BC}\uFE0F';
         const label = item.type === 'video' ? 'Video' : 'Image';
-        return `<a href="${item.url}" target="_blank" rel="noopener" class="carousel-dl-link" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;" onmouseover="this.style.background='#0d6e66';this.style.color='#fff'" onmouseout="this.style.background='#fff';this.style.color='#0d6e66'">${icon} ${label} ${i + 1}</a>`;
+        const ext = item.type === 'video' ? '.mp4' : '.jpg';
+        const fname = `flipit-${platform || 'media'}-${i + 1}${ext}`;
+        return `<button class="carousel-dl-btn" data-url="${item.url}" data-fname="${fname}" onclick="forceDownload(this.dataset.url,this.dataset.fname).then(()=>{this.textContent='\\u2705 Done';setTimeout(()=>this.textContent='${icon} ${label} ${i + 1}',2000)})" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;" onmouseover="this.style.background='#0d6e66';this.style.color='#fff'" onmouseout="this.style.background='#fff';this.style.color='#0d6e66'">${icon} ${label} ${i + 1}</button>`;
     }).join('');
 
     const section = document.createElement('div');
@@ -271,45 +341,82 @@ function appendSection(container, title, text, copyable) {
 // based on the flipped script content.
 function buildVideoPrompt(flippedScript, platform) {
     const script = (flippedScript || '').trim();
-
-    // Take the first sentence as the hook seed.
-    const firstSentence = (script.split(/(?<=[.!?])\s+/)[0] || script).slice(0, 160);
-
-    // Heuristic style picks based on the script content.
     const lower = script.toLowerCase();
-    let style;
-    if (/story|happened|i was|when i|last week|yesterday/.test(lower)) {
-        style = 'Cinematic talking-head with dynamic b-roll cutaways. Shallow depth of field, warm tones, handheld energy.';
-    } else if (/tip|step|how to|here.s how|hack|secret/.test(lower)) {
-        style = 'Fast-cut tutorial style. Clean overhead and over-the-shoulder shots, on-screen text overlays, modern minimal aesthetic.';
-    } else if (/data|study|number|research|stats|%/.test(lower)) {
-        style = 'Data-driven motion graphics mixed with sleek b-roll. Cool color palette, kinetic typography, documentary feel.';
+
+    // Extract the core topic from the script
+    const stop = new Set(['i','you','we','they','he','she','it','the','a','an','my','your','this','that','and','or','but','so','if','to','of','in','on','at','by','for','with','as','is','am','are','was','were','be','been','have','has','had','do','does','did','will','would','should','could','can','just','really','very','not','no','dont','stop','scrolling','past','regret','nobody','tells','changes','wrong','scroll','later','sign','finally','action','send','comment','save','share','follow','dm','link','bio']);
+    const words = lower.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w => w.length > 3 && !stop.has(w));
+    const freq = {}; words.forEach(w => freq[w] = (freq[w]||0)+1);
+    const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,5).map(e => e[0]);
+    const topic = topWords.slice(0,3).join(' ') || 'lifestyle content';
+
+    // Detect niche for specific visuals
+    let subject, setting, action, mood, cameraMove;
+
+    if (/skincare|beauty|skin|serum|glow|makeup|routine/.test(lower)) {
+        subject = 'a woman with glowing dewy skin, soft natural makeup, hair pulled back';
+        setting = 'bright modern bathroom with white marble counter, skincare products arranged neatly, soft morning light through frosted window';
+        action = 'gently applying serum to her face, looking into the camera confidently, then showing the product close-up';
+        mood = 'fresh, clean, aspirational, soft warm tones';
+        cameraMove = 'slow push-in starting from medium shot to extreme close-up of skin texture';
+    } else if (/fitness|workout|gym|exercise|muscle|training|body/.test(lower)) {
+        subject = 'an athletic person in fitted workout clothes, defined muscles, focused expression';
+        setting = 'modern gym with dramatic side lighting, weight racks in background, concrete floor, industrial aesthetic';
+        action = 'performing a powerful exercise movement in slow motion, sweat visible, then standing up confidently facing camera';
+        mood = 'intense, powerful, motivating, high contrast with deep shadows';
+        cameraMove = 'dynamic low angle tracking shot, then quick whip-pan to close-up of determined face';
+    } else if (/food|recipe|cook|meal|kitchen|eat|bake/.test(lower)) {
+        subject = 'hands preparing a beautiful dish, fresh colorful ingredients';
+        setting = 'warm rustic kitchen, wooden cutting board, copper pots, herbs on windowsill, soft natural light from left';
+        action = 'chopping fresh ingredients, tossing them in a pan with a sizzle, then revealing the final plated dish with steam rising';
+        mood = 'warm, appetizing, cozy, rich golden tones';
+        cameraMove = 'overhead shot of hands working, then slow cinematic tilt down to reveal the finished plate';
+    } else if (/business|entrepreneur|money|income|startup|marketing|brand|freelance|client/.test(lower)) {
+        subject = 'a confident professional in smart casual attire, clean groomed appearance';
+        setting = 'sleek modern workspace with large monitor showing graphs, minimalist desk, city view through floor-to-ceiling windows';
+        action = 'typing on laptop, then turning to camera with a knowing look, phone lights up with a notification';
+        mood = 'ambitious, polished, aspirational, cool neutral tones with warm accents';
+        cameraMove = 'smooth dolly shot circling the desk, then rack focus from screen to person\'s face';
+    } else if (/fashion|outfit|style|wear|streetwear|clothes/.test(lower)) {
+        subject = 'a stylish person in a curated outfit, accessories on point, confident posture';
+        setting = 'urban street with interesting architecture, textured walls, golden hour sunlight casting long shadows';
+        action = 'walking toward camera in slow motion, doing a subtle pose turn, fabric and accessories catching the light';
+        mood = 'bold, editorial, effortlessly cool, warm golden tones';
+        cameraMove = 'tracking shot following the walk, then freeze frame at the perfect pose moment';
+    } else if (/mindset|motivation|success|growth|journal|meditat|morning|routine|habits/.test(lower)) {
+        subject = 'a calm focused person in comfortable minimal clothing';
+        setting = 'serene minimalist room, morning sunlight streaming through sheer curtains, journal and coffee on wooden table, green plant';
+        action = 'writing in a journal thoughtfully, then looking up through the window with a peaceful confident expression';
+        mood = 'peaceful, intentional, warm, soft golden morning light';
+        cameraMove = 'gentle slow zoom from wide room shot to intimate close-up of hands writing, then face';
+    } else if (/tech|ai|app|software|code|digital|automation|tool/.test(lower)) {
+        subject = 'a person at a high-end tech setup, screen glow reflecting on their face';
+        setting = 'dark modern desk setup with ultrawide monitor, RGB ambient lighting, mechanical keyboard, clean cable management';
+        action = 'scrolling through code or a dashboard, then leaning back with a satisfied expression as results appear on screen';
+        mood = 'futuristic, innovative, focused, cool blue and purple ambient glow';
+        cameraMove = 'rack focus from glowing screen to person\'s face, then slow pull-back revealing the full setup';
+    } else if (/travel|adventure|beach|mountain|explore|trip|vacation/.test(lower)) {
+        subject = 'a traveler with a backpack, windswept hair, sun-kissed skin';
+        setting = 'breathtaking panoramic landscape, dramatic clouds, golden hour light painting everything warm, vast open space';
+        action = 'walking toward a stunning viewpoint, arms spreading slightly, taking in the view, then turning to camera with a smile';
+        mood = 'epic, free, wanderlust, warm golden and teal tones';
+        cameraMove = 'dramatic drone-style pull-back from close-up to wide aerial revealing the landscape';
     } else {
-        style = 'Cinematic vertical 9:16 with high-contrast lighting. Mix of talking-head and b-roll, modern Reel/TikTok pacing.';
+        subject = `a confident creator speaking about ${topic}`;
+        setting = 'aesthetically pleasing modern space, clean background with subtle depth, warm natural lighting';
+        action = 'speaking directly to camera with natural hand gestures, genuine expressions, then showing relevant visuals as b-roll';
+        mood = 'authentic, engaging, scroll-stopping, warm balanced tones';
+        cameraMove = 'smooth push-in from medium to close-up, with subtle handheld movement for energy';
     }
 
-    // Pick a sensible scene description.
-    const scene = `A creator delivers the message below in a visually engaging vertical 9:16 format optimised for ${platform || 'social media'}. Camera moves with subtle motion, environment matches the topic, and supporting b-roll reinforces every key beat.`;
+    // Build 3 ready-to-paste prompts for different AI video tools
+    const prompt1 = `${subject}, ${setting}, ${action}. ${mood}. Vertical 9:16, cinematic shallow depth of field, ${cameraMove}. Shot on anamorphic lens, 24fps with subtle film grain. Professional color grading.`;
 
-    // Hook: dramatic opening visual.
-    const hook = `Open on an arresting visual that physicalises this line: "${firstSentence}". Use a fast push-in or whip-pan, big bold on-screen text, and a sound design hit on frame 1 to stop the scroll.`;
+    const prompt2 = `Close-up b-roll sequence: hands interacting with objects related to ${topic}, beautiful detail shots with bokeh background, slow motion 60fps, ${mood}, each shot 2-3 seconds with smooth transitions. Vertical 9:16, ${setting.split(',')[0]}.`;
 
-    // CTA visual.
-    const cta = `End on the creator looking straight into camera with bold animated text: "Follow for more" plus a thumb-stopping freeze frame. Hold 1.5s for the loop.`;
+    const prompt3 = `Split-screen transition sequence: left side shows the "before" struggle, right side reveals the "after" transformation related to ${topic}. ${subject}. Dramatic lighting shift from cool desaturated tones to warm vibrant colors. Vertical 9:16, cinematic, modern social media pacing.`;
 
-    return [
-        `[SCENE]: ${scene}`,
-        ``,
-        `[HOOK]: ${hook}`,
-        ``,
-        `[STYLE]: ${style}`,
-        ``,
-        `[VOICEOVER]: ${script}`,
-        ``,
-        `[CTA]: ${cta}`,
-        ``,
-        `Aspect ratio: 9:16. Duration: 15-45 seconds. Pacing: fast cuts every 1-2 seconds. Audio: trending upbeat bed + clear VO mix. Subtitles: burned-in, large, high-contrast.`
-    ].join('\n');
+    return `PROMPT 1 — Main Scene (paste into Runway / Kling / Sora):\n${prompt1}\n\nPROMPT 2 — B-Roll Shots:\n${prompt2}\n\nPROMPT 3 — Transition Effect:\n${prompt3}`;
 }
 
 // ── PROMPT BUTTONS (Video + Image) ──────────────────────
@@ -356,14 +463,13 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
         div.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    // Image Prompt click handler — uses Claude Vision to analyze actual images
+    // Image Prompt click handler — AI Vision analyzes actual downloaded images
     imageBtn.addEventListener('click', async () => {
         const existing = container.querySelector('.image-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
         const imageUrls = window._lastCarouselUrls || [];
 
-        // If we have actual image URLs, analyze them with AI
         if (imageUrls.length > 0) {
             imageBtn.disabled = true;
             imageBtn.textContent = '\u23F3 Analyzing images...';
@@ -372,24 +478,22 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
             div.className = 'result-section image-prompt-section';
             div.style.borderLeftColor = '#c2185b';
             div.innerHTML = `
-                <h3>\u{1F5BC}\uFE0F AI Image Prompts — Analyzing ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''}...</h3>
-                <p style="color:#777;font-size:14px;margin-bottom:14px;">Claude Vision is analyzing each image to create recreation prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>
-                <div id="imagePromptsContainer"><div class="loading">\u{1F50D} Analyzing images with AI vision...</div></div>
+                <h3>\u{1F5BC}\uFE0F AI Image Prompts \u2014 Analyzing ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''}...</h3>
+                <p style="color:#777;font-size:14px;margin-bottom:14px;">AI Vision is analyzing each image and writing a prompt to recreate it.</p>
+                <div id="imagePromptsContainer"></div>
             `;
             container.appendChild(div);
             div.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
             const promptsContainer = document.getElementById('imagePromptsContainer');
-            let completedCount = 0;
-            promptsContainer.innerHTML = '';
+            let done = 0;
 
-            // Analyze each image
             for (let i = 0; i < imageUrls.length; i++) {
                 const slideDiv = document.createElement('div');
                 slideDiv.style.cssText = 'margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;';
                 slideDiv.innerHTML = `
-                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
-                    <p class="result-text" style="margin-bottom:8px;color:#999;">\u23F3 Analyzing...</p>
+                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;">\u{1F5BC}\uFE0F IMAGE ${i + 1} of ${imageUrls.length}</p>
+                    <p class="result-text" style="color:#999;">\u23F3 Analyzing what\u2019s in this image...</p>
                 `;
                 promptsContainer.appendChild(slideDiv);
 
@@ -403,50 +507,30 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
                     if (res.ok && data.prompt) {
                         slideDiv.innerHTML = `
-                            <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
+                            <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;">\u{1F5BC}\uFE0F IMAGE ${i + 1} of ${imageUrls.length}</p>
                             <p class="result-text" style="margin-bottom:8px;">${escapeHtml(data.prompt)}</p>
                             <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
                         `;
                     } else {
-                        slideDiv.querySelector('.result-text').textContent = '\u274C Could not analyze this image: ' + (data.error || 'Unknown error');
+                        slideDiv.querySelector('.result-text').textContent = '\u274C ' + (data.error || 'Could not analyze this image');
                         slideDiv.querySelector('.result-text').style.color = '#c2185b';
                     }
                 } catch (err) {
-                    slideDiv.querySelector('.result-text').textContent = '\u274C Error analyzing image: ' + err.message;
+                    slideDiv.querySelector('.result-text').textContent = '\u274C Error: ' + err.message;
                     slideDiv.querySelector('.result-text').style.color = '#c2185b';
                 }
 
-                completedCount++;
-                div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${completedCount}/${imageUrls.length} analyzed`;
+                done++;
+                div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts \u2014 ${done}/${imageUrls.length} done`;
             }
 
-            div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''} analyzed`;
+            div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts \u2014 ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''} analyzed \u2705`;
             imageBtn.disabled = false;
             imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
 
         } else {
-            // No images downloaded — fall back to topic-based prompts
-            const prompts = buildImagePrompts(flippedScript, originalCaption, platform, carouselCount);
-            const div = document.createElement('div');
-            div.className = 'result-section image-prompt-section';
-            div.style.borderLeftColor = '#c2185b';
-
-            let html = '<h3>\u{1F5BC}\uFE0F Image Creation Prompts</h3>';
-            html += '<p style="color:#777;font-size:14px;margin-bottom:14px;">Download images first for AI-analyzed prompts, or use these topic-based prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>';
-
-            prompts.forEach((p, i) => {
-                html += `
-                    <div style="margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                        <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">${p.label}</p>
-                        <p class="result-text" style="margin-bottom:8px;">${escapeHtml(p.prompt)}</p>
-                        <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                    </div>
-                `;
-            });
-
-            div.innerHTML = html;
-            container.appendChild(div);
-            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // No images downloaded — tell user to download first
+            showError('Download images first, then click Image Prompt to analyze them.', 'errorMessage');
         }
     });
 }
@@ -473,90 +557,156 @@ function guessTopic(text) {
 
 // ── IMAGE PROMPT BUILDER ────────────────────────────────
 function buildImagePrompts(flippedScript, originalCaption, platform, carouselCount) {
+    const caption = (originalCaption || '').trim();
     const script = (flippedScript || '').trim();
-    const lower = script.toLowerCase();
+    const text = (caption + ' ' + script).toLowerCase();
 
-    // Detect content type for styling
-    let style, mood, setting;
-    if (/fitness|workout|gym|health|body|muscle/.test(lower)) {
-        style = 'fitness lifestyle photography'; mood = 'energetic, powerful, motivated'; setting = 'modern gym or outdoor fitness space, golden hour lighting';
-    } else if (/food|recipe|cook|kitchen|meal|eat/.test(lower)) {
-        style = 'professional food photography'; mood = 'warm, appetizing, cozy'; setting = 'rustic kitchen counter or marble table, soft natural window light';
-    } else if (/travel|trip|adventure|explore|beach|mountain/.test(lower)) {
-        style = 'travel photography'; mood = 'wanderlust, freedom, epic'; setting = 'breathtaking landscape, vibrant colors, cinematic composition';
-    } else if (/business|entrepreneur|startup|money|income|hustle/.test(lower)) {
-        style = 'professional business photography'; mood = 'confident, sleek, aspirational'; setting = 'modern workspace or luxury office, clean minimal aesthetic';
-    } else if (/beauty|skincare|makeup|glow|skin/.test(lower)) {
-        style = 'beauty editorial photography'; mood = 'glowing, elegant, fresh'; setting = 'soft diffused lighting, clean pastel background, dewy skin texture';
-    } else if (/fashion|outfit|style|wear|look/.test(lower)) {
-        style = 'fashion editorial photography'; mood = 'trendy, bold, curated'; setting = 'urban street or minimalist studio, dramatic lighting';
-    } else if (/mindset|motivation|success|growth|manifest/.test(lower)) {
-        style = 'inspirational lifestyle photography'; mood = 'calm, focused, powerful'; setting = 'minimalist space with warm tones, sunrise or golden hour light';
-    } else if (/tech|app|software|ai|digital|code/.test(lower)) {
-        style = 'tech product photography'; mood = 'futuristic, clean, innovative'; setting = 'dark sleek desk setup, neon accent lights, shallow depth of field';
-    } else if (/home|interior|decor|design|room|space/.test(lower)) {
-        style = 'interior design photography'; mood = 'warm, inviting, aesthetic'; setting = 'beautifully styled room, natural light through windows, earth tones';
-    } else {
-        style = 'social media content photography'; mood = 'engaging, authentic, scroll-stopping'; setting = 'aesthetically pleasing environment, natural lighting, warm tones';
+    // ── Extract the real topic in detail ──
+    const clean = text.replace(/#\w+/g,'').replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]+/g,'').replace(/https?:\/\/\S+/g,'').replace(/[^\w\s'-]/g,' ').replace(/\s+/g,' ').trim();
+    const stop = new Set(['i','you','we','they','he','she','it','the','a','an','my','your','our','their','this','that','and','or','but','so','if','to','of','in','on','at','by','for','with','as','is','am','are','was','were','be','been','being','have','has','had','do','does','did','will','would','should','could','may','might','can','just','really','very','im','ill','its','put','get','got','go','going','went','make','made','here','there','now','then','some','all','any','me','us','them','about','into','up','down','out','over','under','off','from','than','too','free','new','step','together','not','no','yes','also','more','most','like','want','need','know','think','thing','things','way','ways','much','many','every','each','dont','didnt','cant','wont','youre','youll','heres','thats','whats','lets','one','two','three','four','five','six','seven','eight','nine','ten','still','even','back','never','always','already','something','someone','everything','follow','share','save','comment','post','repost','tag','dm','link','bio','page','stop','scrolling','scroll','nobody','tells','changes','wrong','past','regret','later','sign','finally','action','send']);
+    const meaningful = clean.split(' ').filter(w => w.length > 3 && !stop.has(w));
+    const freq = {}; meaningful.forEach(w => freq[w] = (freq[w]||0)+1);
+    const ranked = Object.entries(freq).sort((a,b) => b[1]-a[1]).map(e => e[0]);
+    const topicWords = ranked.slice(0, 6);
+
+    // Get hashtag words as bonus context
+    const hashtags = [...new Set((text.match(/#(\w+)/g)||[]).map(h => h.slice(1)))].filter(h => h.length > 3);
+
+    // Get real sentences from the original caption (the actual post content)
+    const realSentences = caption.replace(/#\w+/g,'').replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]+/g,'').split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 15 && !/^(follow|share|save|comment|tag|dm)/i.test(s));
+
+    // ── Detect what this content is ACTUALLY about ──
+    const scenes = [];
+
+    // Skincare / Beauty
+    if (/skincare|skin care|serum|moisturi|cleanser|routine|glow|acne|spf|retinol|toner|facial|exfoliat/.test(text)) {
+        scenes.push(
+            'Close-up of hands applying a clear serum from a glass dropper onto glowing skin, bathroom counter with minimalist skincare bottles lined up, soft morning light from frosted window, steam from a warm towel in background',
+            'Flat lay of skincare products on white marble — glass serum bottle, jade roller, cotton pads, small succulent plant, clean minimal aesthetic, overhead shot, soft even lighting',
+            'Woman touching her face gently looking at bathroom mirror, dewy fresh skin, white robe, bright clean bathroom with plants, ring light reflection in mirror',
+            'Before and after skin texture close-up, left side slightly dull, right side radiant and hydrated, clinical clean background, macro lens detail showing pores and texture',
+            'Nighttime skincare routine flat lay on bedside table — eye cream, sleeping mask, silk pillowcase, candle, warm dim lighting, cozy evening mood',
+            'Hand holding up a skincare product bottle against a blurred bathroom background, product label visible, soft bokeh, natural light, editorial product shot'
+        );
+    }
+    // Fitness / Workout
+    else if (/fitness|workout|gym|exercise|training|muscle|weight|cardio|yoga|run|body|abs|protein|squat|deadlift|bench|hiit|stretching/.test(text)) {
+        scenes.push(
+            'Athletic person mid-workout in a modern gym, dramatic side lighting highlighting muscle definition, sweat visible, determination on face, weight rack blurred in background',
+            'Overhead flat lay of fitness essentials — protein shaker, resistance bands, wireless earbuds, training gloves, towel, gym bag — on dark concrete floor',
+            'Person stretching on yoga mat at sunrise, floor-to-ceiling windows with city skyline, warm golden light streaming in, peaceful and focused expression',
+            'Close-up of hands gripping a barbell, chalk dust visible, knurling texture in sharp detail, blurred gym background with warm tungsten lights',
+            'Before and after transformation — split image concept, left side slouched posture in baggy clothes, right side confident posture in fitted activewear, same person same location',
+            'Post-workout scene — person sitting on gym bench drinking from shaker bottle, towel around neck, phone showing workout tracker, satisfied exhausted expression'
+        );
+    }
+    // Food / Recipe / Cooking
+    else if (/food|recipe|cook|kitchen|meal|eat|bake|ingredient|breakfast|lunch|dinner|smoothie|salad|pasta|chicken|avocado|coffee|chocolate|prep/.test(text)) {
+        scenes.push(
+            'Beautifully plated dish on ceramic plate, rustic wooden table, fresh herbs as garnish, steam rising, natural window light from left side, shallow depth of field on the food',
+            'Overhead flat lay of fresh ingredients arranged on marble counter — colorful vegetables, olive oil bottle, wooden cutting board, chef knife, linen napkin, bright natural light',
+            'Hands chopping vegetables on wooden cutting board, kitchen background softly blurred, copper pots hanging, herbs in small pots on windowsill, warm inviting atmosphere',
+            'Close-up of food texture — crispy golden crust, melted cheese pull, dripping sauce, or fresh fruit cross-section — macro lens, mouth-watering detail, soft backlight for glow',
+            'Cozy breakfast table scene — steaming coffee cup, toast with avocado, fresh fruit bowl, morning newspaper, sunlight through kitchen window casting warm shadows on table',
+            'Person tasting from a wooden spoon over a steaming pot, kitchen apron, genuine happy expression, busy kitchen counter with ingredients, lifestyle cooking moment'
+        );
+    }
+    // Business / Entrepreneur / Money
+    else if (/business|entrepreneur|startup|money|income|hustle|career|invest|profit|client|sales|marketing|brand|freelance|agency|strategy|revenue|wealth/.test(text)) {
+        scenes.push(
+            'Person working on laptop in modern minimalist office, clean white desk, large monitor showing analytics dashboard, coffee cup, small plant, natural light from large window',
+            'Flat lay of business essentials on dark oak desk — MacBook Pro, leather notebook with pen, smartphone, AirPods case, espresso, reading glasses — top-down professional shot',
+            'Confident person in smart casual attire standing in modern co-working space, glass walls, cityscape behind, arms crossed, natural power pose, editorial portrait',
+            'Close-up of hands typing on laptop keyboard, screen showing revenue graphs going up, clean desk setup, warm desk lamp glow, focus and productivity atmosphere',
+            'Whiteboard covered in strategy diagrams and sticky notes, person pointing at key section, modern office background, team meeting energy, natural light',
+            'Person holding smartphone showing notification of payment received, slight smile, casual modern outfit, coffee shop background blurred, authentic success moment'
+        );
+    }
+    // Fashion / Style / Outfit
+    else if (/fashion|outfit|style|wear|look|dress|shoes|sneakers|streetwear|vintage|wardrobe|closet|accessori|jewelry|watch/.test(text)) {
+        scenes.push(
+            'Full-body outfit shot on urban street, person walking confidently, interesting architecture background, natural daylight, street style editorial, slight motion blur on edges',
+            'Flat lay of curated outfit on white bedsheet — folded clothes, shoes, accessories, sunglasses, watch, perfume bottle — styled arrangement, overhead shot, soft shadows',
+            'Close-up detail shot of accessories — watch on wrist, rings on fingers, or shoe texture — shallow DOF bokeh background, luxury editorial feel, natural sidelight',
+            'Person standing in front of full-length mirror in bright walk-in closet, organized clothing racks behind, trying on outfit, natural light, candid fashion moment',
+            'Street style portrait — waist up, person leaning against textured wall, interesting shadows, sunglasses, effortlessly cool pose, golden hour warm tones',
+            'Shoe or bag detail shot on clean surface, product photography style, soft shadows, minimalist background, one accent prop like dried flowers or coffee cup'
+        );
+    }
+    // Mindset / Motivation / Self-care
+    else if (/mindset|motivation|success|growth|manifest|discipline|focus|goals|journal|meditat|gratitude|self.?care|mental|anxiety|peace|habits?|morning|routine/.test(text)) {
+        scenes.push(
+            'Person journaling at a clean desk by a window, warm morning light, steaming cup of tea, candle, plant, calm and focused expression, cozy minimalist space',
+            'Flat lay of morning routine items — journal with pen, gratitude list, herbal tea, crystals, essential oil bottle, small plant — on linen fabric, soft warm tones',
+            'Person meditating cross-legged on floor cushion, eyes closed, serene expression, minimalist room with single plant and sunlight beam, peaceful atmosphere',
+            'Close-up of hands writing in a leather journal, beautiful handwriting visible, warm desk lamp light, wooden desk texture, ink pen, intimate focused moment',
+            'Sunrise view through bedroom window, silhouette of person stretching with arms up, warm golden orange light flooding the room, new day energy, hopeful mood',
+            'Cozy reading corner — person wrapped in blanket on armchair, book in hands, warm lamp light, rain visible through window, hygge comfort, soft muted earth tones'
+        );
+    }
+    // Tech / AI / Digital
+    else if (/tech|app|software|ai|digital|code|program|developer|saas|automation|tool|dashboard|data|computer|laptop/.test(text)) {
+        scenes.push(
+            'Developer at dual monitor setup, code on screen, dark room with RGB accent lighting, mechanical keyboard, focused expression, screen glow on face, cyberpunk aesthetic',
+            'Flat lay of tech workspace — laptop, smartphone, tablet, wireless charger, USB-C hub, sticker-covered laptop lid — dark desk, overhead neon glow, clean arrangement',
+            'Close-up of screen showing code or analytics dashboard, reflection visible in glasses worn by person, shallow DOF, blue-green screen light, cinematic tech mood',
+            'Person demonstrating app on smartphone, screen visible to camera, clean modern background, product demo pose, good lighting on both face and phone screen',
+            'Futuristic workspace — ultrawide monitor, standing desk, smart home devices, ambient LED strip lighting, city night view through window, productivity setup goals',
+            'Hand holding phone showing AI chat interface or app dashboard, clean minimal background, focus on screen content, natural daylight, editorial tech lifestyle'
+        );
+    }
+    // Travel / Adventure
+    else if (/travel|trip|adventure|explore|beach|mountain|flight|hotel|resort|island|vacation|backpack|ocean|forest/.test(text)) {
+        scenes.push(
+            'Person standing at scenic viewpoint overlooking vast landscape, backpack on, arms slightly out, golden hour light, epic cinematic wide shot, sense of freedom and scale',
+            'Flat lay of travel essentials on rustic wooden surface — passport, boarding pass, camera, sunglasses, map, local currency — warm natural light, wanderlust aesthetic',
+            'Candid moment at outdoor café in a foreign city, local architecture in background, person laughing with coffee, cobblestone street, warm European afternoon light',
+            'Close-up of hiking boots on rocky mountain trail, blurred valley view below, dust and texture visible, adventure mood, warm earthy tones, wide angle perspective',
+            'Beach sunset scene — person walking along shoreline, gentle waves, footprints in sand, dramatic orange and pink sky, silhouette shot, peaceful and cinematic',
+            'Hotel room morning — person sitting on white bed looking through large window at city or ocean view, bathrobe, room service tray, luxury travel moment'
+        );
+    }
+    // Generic — build from topic words
+    else {
+        const tw = topicWords.slice(0, 3).join(' ') || 'lifestyle content';
+        scenes.push(
+            `Person engaged with ${tw} in a modern, well-lit space, natural window light, authentic candid moment, shallow depth of field, warm inviting tones, editorial lifestyle shot`,
+            `Aesthetic flat lay arrangement related to ${tw} on clean surface — 5-7 relevant items neatly styled, overhead shot, soft even lighting, Instagram-worthy composition`,
+            `Close-up detail shot capturing the essence of ${tw}, macro lens, beautiful bokeh background, rich textures visible, warm natural sidelight, editorial quality`,
+            `Person confidently presenting or demonstrating ${tw}, eye-level medium shot, clean modern background, professional but approachable, natural soft lighting`,
+            `Atmospheric wide shot showing ${tw} in context, environmental storytelling, leading lines, golden hour warmth, cinematic 35mm composition, aspirational mood`,
+            `Behind-the-scenes candid moment related to ${tw}, authentic and unpolished, natural available light, documentary style, genuine human connection`
+        );
     }
 
-    const topic = guessTopic(stripHashtags(script));
-    const sentences = script.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length > 5);
+    // ── Add topic-specific details to each scene ──
+    const topicDetail = topicWords.length > 0 ? ` The content is specifically about ${topicWords.slice(0, 4).join(', ')}.` : '';
+    const hashDetail = hashtags.length > 0 ? ` Related to: ${hashtags.slice(0, 4).join(', ')}.` : '';
+    const timeDetail = /morning|sunrise|dawn/.test(text) ? ' Morning golden light.' : /evening|sunset|night/.test(text) ? ' Evening warm ambient light.' : '';
 
-    // Determine how many slides to generate
-    const slideCount = Math.max(carouselCount || 0, 6);
-
-    // Slide templates — each slide gets a unique angle/composition
-    const slideTemplates = [
-        {
-            label: '\u{1F4F8} Slide 1 — Hook / Cover',
-            build: () => `Dramatic, scroll-stopping ${style} image for a carousel cover about "${topic}". ${setting}. Bold composition with space for large text overlay at top. Subject centered, hero shot. Mood: ${mood}. Shot on Sony A7IV, 35mm f/1.4. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4A1} Slide 2 — The Problem',
-            build: () => `${style} image showing the "problem" or "before" state related to "${topic}". ${setting}. Slightly desaturated or moody tones to convey frustration or confusion. Clean composition with text space on the right. 4:5 aspect ratio. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{2728} Slide 3 — Key Insight',
-            build: () => `Clean, bright ${style} image representing a key insight or "aha moment" about "${topic}". ${setting}. Overhead flat lay or close-up detail shot. Warm highlights, ${mood} mood. Minimalist composition with space for text overlay. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4CA} Slide 4 — Data / Proof',
-            build: () => `Infographic-style ${style} image for a carousel slide about "${topic}". Light cream background (#faf8f5), teal (#0d6e66) and coral (#e8734a) accent colors. Left side: visual element. Right side: clean space for stats/text. Modern flat design, soft shadows. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F527} Slide 5 — How-To / Steps',
-            build: () => `Step-by-step visual for "${topic}". ${style}, tutorial angle — overhead or over-the-shoulder. ${setting}. Show hands or tools in action. Clean numbered layout space. Mood: ${mood}. Bright, well-lit, instructional feel. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F525} Slide 6 — Result / Transformation',
-            build: () => `Aspirational "after" or result image for "${topic}". ${style}. ${setting}. Vibrant, high-contrast, ${mood} mood. Subject looks confident/successful. Golden hour lighting, cinematic depth of field. Space for bold CTA text at bottom. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F3AF} Slide 7 — CTA / Save This',
-            build: () => `Bold call-to-action slide design for "${topic}". Solid gradient background (teal #0d6e66 to coral #e8734a). Clean center space for large CTA text like "Save This" or "Follow for More". Minimal, modern, high contrast. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4F1} Slide 8 — Behind the Scenes',
-            build: () => `Authentic behind-the-scenes ${style} image related to "${topic}". ${setting}. Candid, raw, slightly imperfect. Natural light, shallow depth of field. Shows the real process. Mood: genuine, relatable. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F30D} Slide 9 — Lifestyle Context',
-            build: () => `Wide lifestyle ${style} shot showing "${topic}" in a real-world context. ${setting}. Environmental portrait or establishing shot. Cinematic composition, leading lines. ${mood} mood. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F48E} Slide 10 — Premium Detail',
-            build: () => `Ultra close-up macro ${style} shot highlighting a premium detail related to "${topic}". ${setting}. Shallow depth of field, bokeh background. Texture-rich, ${mood} mood. Editorial quality. --ar 4:5 --style raw --v 6.1`
-        }
+    // ── Build final prompts ──
+    const slideCount = Math.max(carouselCount || 0, Math.min(scenes.length, 6));
+    const slideLabels = [
+        '\u{1F4F8} Slide 1 \u2014 Hook / Cover',
+        '\u{1F4A1} Slide 2 \u2014 The Problem',
+        '\u{2728} Slide 3 \u2014 Key Insight',
+        '\u{1F4CA} Slide 4 \u2014 Proof / Detail',
+        '\u{1F527} Slide 5 \u2014 How-To / Action',
+        '\u{1F525} Slide 6 \u2014 Result / CTA',
+        '\u{1F3AF} Slide 7 \u2014 Save This',
+        '\u{1F4F1} Slide 8 \u2014 Behind the Scenes',
+        '\u{1F30D} Slide 9 \u2014 Lifestyle Context',
+        '\u{1F48E} Slide 10 \u2014 Premium Detail'
     ];
 
-    // Generate prompts for the exact number of slides
     const prompts = [];
-    for (let i = 0; i < slideCount && i < slideTemplates.length; i++) {
-        prompts.push({
-            label: slideTemplates[i].label,
-            prompt: slideTemplates[i].build()
-        });
+    for (let i = 0; i < slideCount && i < scenes.length; i++) {
+        // Weave in a real sentence from the caption if available
+        const realLine = realSentences[i % Math.max(realSentences.length, 1)] || '';
+        const captionContext = realLine ? ` The image should visually represent: "${realLine}".` : '';
+
+        const prompt = scenes[i] + '.' + captionContext + topicDetail + hashDetail + timeDetail + ' Shot on Sony A7IV, 85mm f/1.4, professional editorial quality. --ar 4:5 --style raw --v 6.1';
+        prompts.push({ label: slideLabels[i] || `\u{1F5BC}\uFE0F Slide ${i+1}`, prompt });
     }
 
     return prompts;
@@ -695,6 +845,38 @@ function copyToClipboard(button) {
         button.textContent = '\u2705 Copied!';
         setTimeout(() => { button.textContent = orig; }, 2000);
     });
+}
+
+// AI Enhance — only runs when user clicks the button (per-image, on demand)
+async function aiEnhancePrompt(btn) {
+    const url = btn.dataset.url;
+    const targetId = btn.dataset.target;
+    const target = document.getElementById(targetId);
+    if (!url || !target) return;
+
+    btn.disabled = true;
+    btn.textContent = '\u23F3 Analyzing...';
+
+    try {
+        const res = await fetch('/.netlify/functions/analyze-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: url, slideNumber: 1 })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.prompt) {
+            target.textContent = data.prompt;
+            btn.textContent = '\u2705 Enhanced!';
+            btn.style.background = '#0d6e66';
+        } else {
+            btn.textContent = '\u274C Failed';
+            setTimeout(() => { btn.textContent = '\u2728 AI Enhance'; btn.disabled = false; }, 2000);
+        }
+    } catch (err) {
+        btn.textContent = '\u274C Error';
+        setTimeout(() => { btn.textContent = '\u2728 AI Enhance'; btn.disabled = false; }, 2000);
+    }
 }
 
 function escapeHtml(text) {
