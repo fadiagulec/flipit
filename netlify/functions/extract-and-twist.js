@@ -46,9 +46,6 @@ exports.handler = async function(event) {
   const isTikTok = url.includes('tiktok.com');
   const isFacebook = url.includes('facebook.com') || url.includes('fb.com') || url.includes('fb.watch');
 
-  // Platforms that block direct server-side fetching
-  const isBlocked = isInstagram || isTikTok || isFacebook;
-
   // For TikTok, try oEmbed API to get caption text
   if (isTikTok) {
     try {
@@ -70,23 +67,7 @@ exports.handler = async function(event) {
     }
   }
 
-  // For blocked platforms with no text extracted, return embed info
-  if (isBlocked && !originalText) {
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        original: null,
-        twisted: null,
-        prompt: null,
-        platform: isInstagram ? 'instagram' : isTikTok ? 'tiktok' : 'facebook',
-        embed: true,
-        warning: 'This platform blocks direct text extraction. The video is embedded below — copy the caption from the post and use the Script Rewrite tab to flip it.'
-      })
-    };
-  }
-
-  // For non-blocked platforms, fetch the page
+  // For all platforms, fetch the page
   if (!originalText) {
     try {
       const fetchResp = await fetch(url, {
