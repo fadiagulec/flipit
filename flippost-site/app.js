@@ -79,6 +79,101 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
+// ── VIDEO EMBED ───────────────────────────────────────────
+function getEmbedHtml(url, platform) {
+    try {
+        switch (platform) {
+            case 'instagram': {
+                const match = url.match(/\/(reel|p|tv)\/([A-Za-z0-9_-]+)/);
+                if (match) {
+                    return `<iframe src="https://www.instagram.com/${match[1]}/${match[2]}/embed/" width="100%" height="550" frameborder="0" scrolling="no" allowtransparency="true" allowfullscreen loading="lazy"></iframe>`;
+                }
+                break;
+            }
+            case 'youtube': {
+                let videoId = null;
+                if (url.includes('youtu.be/')) {
+                    videoId = url.split('youtu.be/')[1]?.split(/[?&#]/)[0];
+                } else if (url.includes('/shorts/')) {
+                    videoId = url.split('/shorts/')[1]?.split(/[?&#]/)[0];
+                } else {
+                    const match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+                    videoId = match?.[1];
+                }
+                if (videoId) {
+                    return `<iframe src="https://www.youtube.com/embed/${videoId}" width="100%" height="400" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+                }
+                break;
+            }
+            case 'tiktok': {
+                const match = url.match(/\/video\/(\d+)/) || url.match(/\/(\d{15,})/);
+                if (match) {
+                    return `<iframe src="https://www.tiktok.com/embed/v2/${match[1]}" width="100%" height="600" frameborder="0" allowfullscreen loading="lazy"></iframe>`;
+                }
+                break;
+            }
+            case 'facebook': {
+                const encoded = encodeURIComponent(url);
+                return `<iframe src="https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=false&width=476" width="100%" height="400" frameborder="0" allowfullscreen loading="lazy"></iframe>`;
+            }
+        }
+    } catch (e) {
+        console.error('Embed generation error:', e);
+    }
+    return null;
+}
+
+function renderVideoEmbed(container, url, platform) {
+    const embedHtml = getEmbedHtml(url, platform);
+
+    const section = document.createElement('div');
+    section.className = 'video-embed-section';
+    section.innerHTML = `<h3>${platformEmojis[platform] || '🎬'} Video Preview</h3>`;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'video-embed-wrapper';
+
+    if (embedHtml) {
+        wrapper.innerHTML = embedHtml;
+
+        // Add fallback: if iframe fails to load, show link
+        const iframe = wrapper.querySelector('iframe');
+        if (iframe) {
+            iframe.onerror = function () {
+                wrapper.innerHTML = getFallbackHtml(url, platform);
+            };
+            // Timeout fallback — if iframe is blank after 8s, show fallback
+            setTimeout(() => {
+                try {
+                    if (!wrapper.querySelector('iframe')) {
+                        wrapper.innerHTML = getFallbackHtml(url, platform);
+                    }
+                } catch (e) { /* ignore */ }
+            }, 8000);
+        }
+    } else {
+        wrapper.innerHTML = getFallbackHtml(url, platform);
+    }
+
+    section.appendChild(wrapper);
+
+    const hint = document.createElement('div');
+    hint.className = 'embed-hint';
+    hint.textContent = 'If the video doesn\'t load, click the link below to view it directly.';
+    section.appendChild(hint);
+
+    container.prepend(section);
+}
+
+function getFallbackHtml(url, platform) {
+    const name = platform.charAt(0).toUpperCase() + platform.slice(1);
+    return `<div class="video-embed-fallback">
+        <p style="font-size:40px; margin-bottom:10px;">${platformEmojis[platform] || '🎬'}</p>
+        <p style="color:#888; font-size:16px;">Could not embed this ${name} video directly.</p>
+        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open on ${name} ↗</a>
+    </div>`;
+}
+
 // ── DOWNLOAD ──────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
@@ -166,6 +261,9 @@ async function handleExtractAndTwist() {
     const container = document.getElementById('resultsContainer');
     container.innerHTML = '<div class="loading">🔄 Processing your content, please wait...</div>';
 
+    // Show video embed immediately while we wait for text extraction
+    renderVideoEmbed(container, url, platform);
+
     try {
         const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
             method: 'POST',
@@ -176,11 +274,29 @@ async function handleExtractAndTwist() {
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Extraction failed'); }
 
         const data = await res.json();
-        displayResults(data, platform);
+
+        // Remove the loading indicator but keep the video embed
+        const loadingEl = container.querySelector('.loading');
+        if (loadingEl) loadingEl.remove();
+
+        // Show warning if there is one
+        if (data.warning) {
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'result-section';
+            warningDiv.style.borderLeftColor = '#e8734a';
+            warningDiv.innerHTML = `<h3 style="color:#e8734a;">⚠️ Note</h3><p class="result-text" style="background:#fff8f0;">${escapeHtml(data.warning)}</p>`;
+            container.appendChild(warningDiv);
+        }
+
+        // Show extracted text and flipped version if available
+        if (data.original || data.twisted) {
+            displayResultsContent(container, data, platform);
+        }
     } catch (err) {
         console.error('Extract error:', err);
+        const loadingEl = container.querySelector('.loading');
+        if (loadingEl) loadingEl.remove();
         showError('Something went wrong. Please try again.', 'errorMessage');
-        container.innerHTML = '';
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -191,7 +307,6 @@ function displayResults(data, platform) {
     const container = document.getElementById('resultsContainer');
     container.innerHTML = '';
 
-    // Carousel images preview
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');
         wrap.className = 'carousel-preview';
@@ -213,6 +328,20 @@ function displayResults(data, platform) {
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
     appendSection(container, '✨ Flipped Version', data.twisted, true);
     if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
+}
+
+function displayResultsContent(container, data, platform) {
+    const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
+
+    if (data.original) {
+        appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
+    }
+    if (data.twisted) {
+        appendSection(container, '✨ Flipped Version', data.twisted, true);
+    }
+    if (data.prompt) {
+        appendSection(container, '🎯 Proven Hook', data.prompt, true);
+    }
 }
 
 function appendSection(container, title, text, copyable) {
