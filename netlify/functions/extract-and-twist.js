@@ -41,11 +41,37 @@ exports.handler = async function(event) {
   // Step 1: Fetch the URL and extract text
   let originalText = '';
 
-  // Some platforms block server-side fetching
-  const blocked = ['instagram.com', 'tiktok.com', 'facebook.com', 'fb.com', 'fb.watch'];
-  const isBlocked = blocked.some(d => url.includes(d));
+  // Detect platform
+  const isInstagram = url.includes('instagram.com') || url.includes('instagr.am');
+  const isTikTok = url.includes('tiktok.com');
+  const isFacebook = url.includes('facebook.com') || url.includes('fb.com') || url.includes('fb.watch');
 
-  if (isBlocked) {
+  // Platforms that block direct server-side fetching
+  const isBlocked = isInstagram || isTikTok || isFacebook;
+
+  // For TikTok, try oEmbed API to get caption text
+  if (isTikTok) {
+    try {
+      const oembedResp = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (oembedResp.ok) {
+        const oembedData = await oembedResp.json();
+        if (oembedData.title && oembedData.title.length > 10) {
+          originalText = oembedData.title;
+          if (oembedData.author_name) {
+            originalText = `By @${oembedData.author_name}: ${originalText}`;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('TikTok oEmbed error:', err.message);
+    }
+  }
+
+  // For blocked platforms with no text extracted, return embed info
+  if (isBlocked && !originalText) {
     return {
       statusCode: 200,
       headers,
@@ -53,78 +79,83 @@ exports.handler = async function(event) {
         original: null,
         twisted: null,
         prompt: null,
-        warning: 'This platform blocks server-side access. Please copy the caption/script and use the Script Rewrite tab instead.'
+        platform: isInstagram ? 'instagram' : isTikTok ? 'tiktok' : 'facebook',
+        embed: true,
+        warning: 'This platform blocks direct text extraction. The video is embedded below — copy the caption from the post and use the Script Rewrite tab to flip it.'
       })
     };
   }
 
-  try {
-    const fetchResp = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(10000)
-    });
+  // For non-blocked platforms, fetch the page
+  if (!originalText) {
+    try {
+      const fetchResp = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000)
+      });
 
-    if (!fetchResp.ok) {
+      if (!fetchResp.ok) {
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            original: null, twisted: null, prompt: null, embed: true,
+            warning: 'Could not fetch that page. The video is embedded below if available. Try the Script Rewrite tab for the text.'
+          })
+        };
+      }
+
+      const html = await fetchResp.text();
+
+      // Extract text from HTML
+      originalText = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+        .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+        .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (originalText.length > 3000) {
+        originalText = originalText.substring(0, 3000) + '...';
+      }
+
+      if (originalText.length < 50) {
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            original: null, twisted: null, prompt: null, embed: true,
+            warning: 'Could not extract enough text. The video is embedded below if available. Try the Script Rewrite tab.'
+          })
+        };
+      }
+
+    } catch (err) {
+      console.error('Fetch error:', err.message);
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          original: null, twisted: null, prompt: null,
-          warning: 'Could not fetch that page. Try pasting the text in the Script Rewrite tab.'
+          original: null, twisted: null, prompt: null, embed: true,
+          warning: 'Could not reach this URL. Try the Script Rewrite tab.'
         })
       };
     }
-
-    const html = await fetchResp.text();
-
-    // Extract text from HTML
-    originalText = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-      .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
-      .replace(/<header[\s\S]*?<\/header>/gi, ' ')
-      .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&nbsp;/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (originalText.length > 3000) {
-      originalText = originalText.substring(0, 3000) + '...';
-    }
-
-    if (originalText.length < 50) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          original: null, twisted: null, prompt: null,
-          warning: 'Could not extract enough text from this page. Try the Script Rewrite tab instead.'
-        })
-      };
-    }
-
-  } catch (err) {
-    console.error('Fetch error:', err.message);
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        original: null, twisted: null, prompt: null,
-        warning: 'Could not reach this URL. Try pasting the text in the Script Rewrite tab.'
-      })
-    };
   }
 
   // Step 2: Use Claude to flip the script
@@ -172,7 +203,8 @@ exports.handler = async function(event) {
       body: JSON.stringify({
         original: originalText,
         twisted: twisted,
-        prompt: prompt
+        prompt: prompt,
+        embed: true
       })
     };
 
