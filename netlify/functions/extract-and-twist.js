@@ -38,6 +38,26 @@ exports.handler = async function(event) {
     return { statusCode: 503, headers, body: JSON.stringify({ error: 'Service temporarily unavailable. Please try again later.' }) };
   }
 
+  // Helper: decode HTML entities
+  function decodeEntities(str) {
+    return str
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#x2026;/g, 'â¦')
+      .replace(/&#x2019;/g, 'â')
+      .replace(/&#x2018;/g, 'â')
+      .replace(/&#x201c;/g, 'â')
+      .replace(/&#x201d;/g, 'â')
+      .replace(/&#x2014;/g, 'â')
+      .replace(/&#x2013;/g, 'â')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+
   // Step 1: Fetch the URL and extract text
   let originalText = '';
 
@@ -94,7 +114,7 @@ exports.handler = async function(event) {
 
         const combined = parts.join('\n\n').trim();
         if (combined.length > 30) {
-          originalText = combined;
+          originalText = decodeEntities(combined);
         }
       }
     } catch (err) {
@@ -155,7 +175,7 @@ exports.handler = async function(event) {
       if (pageTitle && pageTitle[1].length > 5 && (!ogTitle || pageTitle[1] !== ogTitle[1])) metaParts.push(pageTitle[1]);
 
       if (metaParts.join(' ').length > 50) {
-        originalText = metaParts.join('\n\n');
+        originalText = decodeEntities(metaParts.join('\n\n'));
       } else {
         // Fall back to full HTML text extraction
         originalText = html
