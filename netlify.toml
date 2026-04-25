@@ -1,14 +1,34 @@
 [build]
-  publish = "flippost-site"
-  command = ""
+  publish = "."
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
+# Redirect API calls to Netlify Functions
 [[redirects]]
-  from = "/landing"
-  to = "/flipit-landing-page.html"
+  from = "/api/generate"
+  to = "/.netlify/functions/generate"
   status = 200
 
 [[redirects]]
-  from = "/thanks"
-  to = "/thank-you.html"
+  from = "/api/extract-and-twist"
+  to = "/.netlify/functions/extract-and-twist"
   status = 200
+
+[[redirects]]
+  from = "/api/download"
+  to = "/.netlify/functions/download"
+  status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src https://www.instagram.com https://www.youtube.com https://www.tiktok.com https://www.facebook.com https://platform.twitter.com https://player.vimeo.com; frame-ancestors 'none'"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

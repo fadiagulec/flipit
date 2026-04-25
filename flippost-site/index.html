@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FlipIt - Viral Script Generator</title>
+    <meta name="description" content="FlipIt — Transform any viral post into a high-performing script with AI. Extract scripts from URLs, rewrite content with viral hooks, and generate niche ideas.">
+    <meta property="og:title" content="FlipIt - Viral Script Generator">
+    <meta property="og:description" content="See It. Flip It. Post It. Go Viral. Extract viral scripts and AI-generated prompts from any social media post.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://flipit-app.netlify.app">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="FlipIt - Viral Script Generator">
+    <meta name="twitter:description" content="Transform any viral post into a high-performing script with AI.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,6 +29,7 @@
             <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
             <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
             <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
+            <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
         </div>
 
         <!-- Tab 1: URL Extract & Twist -->
@@ -27,22 +37,15 @@
             <div class="input-section">
                 <div class="input-group">
                     <label for="urlInput">Paste a social media URL</label>
-                    <input
-                        type="url"
-                        id="urlInput"
-                        placeholder="https://www.instagram.com/reel/... or TikTok, YouTube, LinkedIn, etc."
-                    />
+                    <input type="url" id="urlInput" placeholder="https://www.instagram.com/reel/... or TikTok, YouTube, LinkedIn, etc." />
                 </div>
-
                 <div id="platformBadge"></div>
                 <div id="errorMessage"></div>
-
                 <div id="actionButtons" class="button-group">
                     <button id="downloadBtn" class="btn-tertiary">⬇️ Download Media</button>
                     <button id="extractBtn" class="btn-primary">⚡ Extract & Flip Script</button>
                 </div>
             </div>
-
             <div id="resultsContainer"></div>
         </div>
 
@@ -51,20 +54,13 @@
             <div class="input-section">
                 <div class="input-group">
                     <label for="scriptInput">Paste your script or caption</label>
-                    <textarea
-                        id="scriptInput"
-                        placeholder="Paste any script, caption, or text here and FlipIt will rewrite it with a viral angle and proven hook..."
-                        rows="6"
-                    ></textarea>
+                    <textarea id="scriptInput" placeholder="Paste any script, caption, or text here and FlipIt will rewrite it with a viral angle and proven hook..." rows="6" maxlength="10000"></textarea>
                 </div>
-
                 <div id="scriptErrorMessage"></div>
-
                 <div class="button-group">
                     <button id="rewriteBtn" class="btn-primary">✨ Flip This Script</button>
                 </div>
             </div>
-
             <div id="scriptResultsContainer"></div>
         </div>
 
@@ -73,35 +69,117 @@
             <div class="input-section">
                 <div class="input-group">
                     <label for="nicheInput">Your Niche</label>
-                    <input
-                        type="text"
-                        id="nicheInput"
-                        placeholder="e.g. personal finance, fitness, real estate, cooking..."
-                    />
+                    <input type="text" id="nicheInput" placeholder="e.g. personal finance, fitness, real estate, cooking..." maxlength="200" />
                 </div>
-
                 <div class="input-group">
                     <label for="nicheDescription">What do you want to post about?</label>
-                    <textarea
-                        id="nicheDescription"
-                        placeholder="Describe the topic or result you want to create content about..."
-                        rows="4"
-                    ></textarea>
+                    <textarea id="nicheDescription" placeholder="Describe the topic or result you want to create content about..." rows="4" maxlength="2000"></textarea>
                 </div>
-
                 <div id="ideasErrorMessage"></div>
-
                 <div class="button-group">
                     <button id="generateIdeasBtn" class="btn-secondary">🚀 Generate 3 Viral Ideas</button>
                 </div>
             </div>
-
             <div id="ideasResultsContainer"></div>
+        </div>
+
+        <!-- Tab 4: Image Prompts -->
+        <div id="imgprompt-tab" class="tab-content">
+            <div class="niche-grid" id="nicheGrid">
+                <div class="niche-card selected" data-niche="mommy">
+                    <span class="niche-icon">👩‍👧‍👦</span>
+                    <span class="niche-name">Mommy</span>
+                </div>
+                <div class="niche-card" data-niche="home">
+                    <span class="niche-icon">🏡</span>
+                    <span class="niche-name">Home</span>
+                </div>
+                <div class="niche-card" data-niche="food">
+                    <span class="niche-icon">🍽️</span>
+                    <span class="niche-name">Food</span>
+                </div>
+                <div class="niche-card" data-niche="fashion">
+                    <span class="niche-icon">👗</span>
+                    <span class="niche-name">Fashion</span>
+                </div>
+                <div class="niche-card" data-niche="lifestyle">
+                    <span class="niche-icon">✨</span>
+                    <span class="niche-name">Lifestyle</span>
+                </div>
+                <div class="niche-card" data-niche="beauty">
+                    <span class="niche-icon">💄</span>
+                    <span class="niche-name">Beauty</span>
+                </div>
+                <div class="niche-card" data-niche="travel">
+                    <span class="niche-icon">✈️</span>
+                    <span class="niche-name">Travel</span>
+                </div>
+                <div class="niche-card" data-niche="fitness">
+                    <span class="niche-icon">💪</span>
+                    <span class="niche-name">Fitness</span>
+                </div>
+            </div>
+
+            <div class="input-section">
+                <label style="margin-bottom:10px;">Event / Vibe (optional)</label>
+                <div class="event-pills" id="eventPills">
+                    <span class="event-pill" data-event="Coachella">🎪 Coachella</span>
+                    <span class="event-pill" data-event="Fashion Week">👠 Fashion Week</span>
+                    <span class="event-pill" data-event="Christmas">🎄 Christmas</span>
+                    <span class="event-pill" data-event="Summer">☀️ Summer</span>
+                    <span class="event-pill" data-event="Fall / Autumn">🍂 Fall</span>
+                    <span class="event-pill" data-event="Halloween">🎃 Halloween</span>
+                    <span class="event-pill" data-event="Valentine's Day">💕 Valentine's</span>
+                    <span class="event-pill" data-event="Back to School">📚 Back to School</span>
+                    <span class="event-pill" data-event="New Year">🥂 New Year</span>
+                    <span class="event-pill" data-event="Brunch">🥞 Brunch</span>
+                    <span class="event-pill" data-event="Date Night">🌙 Date Night</span>
+                    <span class="event-pill" data-event="Wedding">💒 Wedding</span>
+                    <span class="event-pill" data-event="Beach Day">🏖️ Beach Day</span>
+                    <span class="event-pill" data-event="Gym">🏋️ Gym</span>
+                </div>
+
+                <div class="input-group">
+                    <label for="imgCustomEvent">Or type a custom event / vibe</label>
+                    <input type="text" id="imgCustomEvent" placeholder="e.g. baby shower, girls' trip, farmers market, spa day..." maxlength="200" />
+                </div>
+                <div class="input-group">
+                    <label for="imgStyle">What kind of images?</label>
+                    <select id="imgStyle">
+                        <option value="Instagram feed photos">Instagram feed photos</option>
+                        <option value="Instagram carousel images">Instagram carousel</option>
+                        <option value="Pinterest pins">Pinterest pins</option>
+                        <option value="TikTok thumbnails">TikTok thumbnails</option>
+                        <option value="YouTube thumbnails">YouTube thumbnails</option>
+                        <option value="Story / Reel cover images">Story / Reel covers</option>
+                        <option value="Flat lay product shots">Flat lay product shots</option>
+                        <option value="Aesthetic mood board images">Mood board images</option>
+                        <option value="any style that fits best">Best fit (auto)</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="imgCount">How many prompts?</label>
+                    <select id="imgCount">
+                        <option value="3">3 prompts</option>
+                        <option value="5" selected>5 prompts</option>
+                        <option value="10">10 prompts</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="imgExtra">Any specific details? (optional)</label>
+                    <textarea id="imgExtra" placeholder="e.g. warm tones, minimalist, include products, outdoor setting, golden hour lighting..." rows="2" maxlength="1000"></textarea>
+                </div>
+                <div id="imgErrorMessage"></div>
+                <div class="button-group">
+                    <button id="generateImgPromptsBtn" class="btn-secondary">📸 Generate Image Prompts</button>
+                </div>
+            </div>
+            <div id="imgResultsContainer"></div>
         </div>
     </main>
 
     <footer>
-        <p>&copy; 2026 <a href="../FlipIt-landing-page.html">FlipIt</a> — All rights reserved.</p>
+        <p>&copy; 2026 <a href="/flipit-landing-page">FlipIt</a> — All rights reserved.</p>
     </footer>
 
     <script src="app.js"></script>
