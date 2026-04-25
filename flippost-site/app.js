@@ -94,6 +94,9 @@ function detectVideoType(url) {
     if (/youtu\.be\//i.test(url)) return 'youtube';
     if (/youtube\.com\/shorts\//i.test(url)) return 'youtube';
     if (/vimeo\.com\/\d+/i.test(url)) return 'vimeo';
+    if (/instagram\.com|instagr\.am/i.test(url)) return 'instagram';
+    if (/tiktok\.com/i.test(url)) return 'tiktok';
+    if (/facebook\.com|fb\.com|fb\.watch/i.test(url)) return 'facebook';
     if (/\.(mp4|webm)(\?|#|$)/i.test(url)) return 'direct';
 
     return null;
@@ -125,6 +128,23 @@ function getVideoEmbedUrl(url, type) {
                 return 'https://player.vimeo.com/video/' + match[1];
             }
             return null;
+        }
+        case 'instagram': {
+            const match = url.match(/\/(reel|p|tv)\/([A-Za-z0-9_-]+)/);
+            if (match) {
+                return 'https://www.instagram.com/' + match[1] + '/' + match[2] + '/embed/';
+            }
+            return null;
+        }
+        case 'tiktok': {
+            const match = url.match(/\/video\/(\d+)/) || url.match(/\/(\d{15,})/);
+            if (match) {
+                return 'https://www.tiktok.com/embed/v2/' + match[1];
+            }
+            return null;
+        }
+        case 'facebook': {
+            return 'https://www.facebook.com/plugins/video.php?href=' + encodeURIComponent(url) + '&show_text=false&width=476';
         }
         case 'direct':
             return url;
@@ -163,7 +183,7 @@ function renderVideoPlayer(container, url) {
         return;
     }
 
-    // Render iframe (YouTube/Vimeo) or <video> (MP4/WebM)
+    // Render based on type
     if (type === 'direct') {
         const ext = url.match(/\.(mp4|webm)/i)?.[1] || 'mp4';
         wrapper.innerHTML = `<video controls width="100%" style="max-height:500px; border-radius:8px;">
@@ -171,6 +191,28 @@ function renderVideoPlayer(container, url) {
             Your browser does not support the video tag.
         </video>`;
         console.log('[FlipIt Video] Rendered <video> tag for', ext);
+    } else if (type === 'instagram') {
+        wrapper.innerHTML = `<iframe
+            src="${escapeHtml(embedUrl)}"
+            width="100%"
+            height="550"
+            frameborder="0"
+            scrolling="no"
+            allowtransparency="true"
+            allowfullscreen
+            loading="lazy"
+        ></iframe>`;
+        console.log('[FlipIt Video] Rendered Instagram embed');
+    } else if (type === 'tiktok') {
+        wrapper.innerHTML = `<iframe
+            src="${escapeHtml(embedUrl)}"
+            width="100%"
+            height="600"
+            frameborder="0"
+            allowfullscreen
+            loading="lazy"
+        ></iframe>`;
+        console.log('[FlipIt Video] Rendered TikTok embed');
     } else {
         wrapper.innerHTML = `<iframe
             src="${escapeHtml(embedUrl)}"
@@ -187,7 +229,8 @@ function renderVideoPlayer(container, url) {
     section.appendChild(wrapper);
     container.prepend(section);
 }
-// ── DOWNLOAD ──────────────────────────────────────────────────────
+
+// ── DOWNLOAD ──────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
 async function handleDownload() {
@@ -256,7 +299,7 @@ function downloadBase64(base64Data, filename, mimeType = 'application/octet-stre
     } catch (e) { console.error('Download error:', e); }
 }
 
-// ── EXTRACT & FLIP ─────────────────────────────────────────────────
+// ── EXTRACT & FLIP ─────────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -405,7 +448,7 @@ function appendSection(container, title, text, copyable) {
     container.appendChild(div);
 }
 
-// ── SCRIPT REWRITE ─────────────────────────────────────────────────
+// ── SCRIPT REWRITE ─────────────────────────────────────────
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -443,7 +486,8 @@ async function handleRewriteScript() {
         btn.textContent = orig;
     }
 }
-// ── NICHE IDEAS ─────────────────────────────────────────────────────
+
+// ── NICHE IDEAS ─────────────────────────────────────────────
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -464,7 +508,18 @@ async function handleGenerateIdeas() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                script: `You are a viral content strategist. Generate 3 highly specific, ready-to-film viral video script ideas for the niche: ${niche}\n\nTopic/Details: ${description}\n\nFor EACH of the 3 ideas, provide:\n1. VIDEO TITLE — a scroll-stopping, curiosity-driven title\n2. HOOK — the exact first 1-2 sentences to say on camera that stops the scroll\n3. SCRIPT OUTLINE — 5-6 bullet points covering what to say, in order\n4. CALL TO ACTION — what to tell viewers at the end\n5. WHY IT WORKS — 1 sentence explaining the psychology behind why this will go viral\n\nNumber each idea clearly (1, 2, 3). Make them specific and actionable — not generic. Mix formats: one educational, one storytelling, one trend/controversial take.`
+                script: `You are a viral content strategist. Generate 3 highly specific, ready-to-film viral video script ideas for the niche: ${niche}
+
+Topic/Details: ${description}
+
+For EACH of the 3 ideas, provide:
+1. VIDEO TITLE — a scroll-stopping, curiosity-driven title
+2. HOOK — the exact first 1-2 sentences to say on camera that stops the scroll
+3. SCRIPT OUTLINE — 5-6 bullet points covering what to say, in order
+4. CALL TO ACTION — what to tell viewers at the end
+5. WHY IT WORKS — 1 sentence explaining the psychology behind why this will go viral
+
+Number each idea clearly (1, 2, 3). Make them specific and actionable — not generic. Mix formats: one educational, one storytelling, one trend/controversial take.`
             })
         });
 
@@ -484,7 +539,7 @@ async function handleGenerateIdeas() {
     }
 }
 
-// ── IMAGE PROMPTS ──────────────────────────────────────────────────
+// ── IMAGE PROMPTS ──────────────────────────────────────────
 var selectedImgNiche = 'mommy';
 var selectedEvent = '';
 
@@ -548,7 +603,23 @@ async function handleGenerateImgPrompts() {
     const container = document.getElementById('imgResultsContainer');
     container.innerHTML = '<div class="loading">📸 Creating your image prompts...</div>';
 
-    const prompt = `You are an expert AI image prompt engineer for social media influencers. Generate exactly ${count} detailed, high-quality image prompts.\n\nInfluencer niche: ${nicheDesc}\nImage style: ${style}\n${eventText ? 'Event / vibe / theme: ' + eventText : ''}\n${extra ? 'Additional details: ' + extra : ''}\n\nRules for each prompt:\n- Write each prompt as a detailed, ready-to-use AI image generation prompt (for Midjourney, DALL-E, or similar)\n- Include specific details: lighting (golden hour, soft natural light, studio), composition (close-up, wide shot, flat lay, overhead), colors, mood, styling details\n- Make prompts Instagram/Pinterest-worthy — aspirational, aesthetic, on-brand\n- Each prompt should be 2-4 sentences of vivid description\n- Number each prompt\n- After each prompt, add a one-line \"CAPTION IDEA:\" that pairs with the image\n- At the end, add a \"POSTING TIPS\" section with 3 tips for this niche\n\nMake each prompt unique — vary the setting, angle, mood, and composition.`;
+    const prompt = `You are an expert AI image prompt engineer for social media influencers. Generate exactly ${count} detailed, high-quality image prompts.
+
+Influencer niche: ${nicheDesc}
+Image style: ${style}
+${eventText ? 'Event / vibe / theme: ' + eventText : ''}
+${extra ? 'Additional details: ' + extra : ''}
+
+Rules for each prompt:
+- Write each prompt as a detailed, ready-to-use AI image generation prompt (for Midjourney, DALL-E, or similar)
+- Include specific details: lighting (golden hour, soft natural light, studio), composition (close-up, wide shot, flat lay, overhead), colors, mood, styling details
+- Make prompts Instagram/Pinterest-worthy — aspirational, aesthetic, on-brand
+- Each prompt should be 2-4 sentences of vivid description
+- Number each prompt
+- After each prompt, add a one-line "CAPTION IDEA:" that pairs with the image
+- At the end, add a "POSTING TIPS" section with 3 tips for this niche
+
+Make each prompt unique — vary the setting, angle, mood, and composition.`;
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -576,7 +647,7 @@ async function handleGenerateImgPrompts() {
     }
 }
 
-// ── UTILITIES ───────────────────────────────────────────────────────
+// ── UTILITIES ───────────────────────────────────────────────
 function copyToClipboard(button) {
     const text = button.previousElementSibling.textContent;
     navigator.clipboard.writeText(text).then(() => {
