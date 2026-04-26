@@ -173,27 +173,8 @@ async function handleDownload() {
                 const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
                 showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
             }
-        } else if (res.ok && data.openUrl && data.downloaders) {
-            // Instagram hard-blocks servers — show friendly helper links
-            const links = data.downloaders.map(d =>
-                '<a href="' + d.url + '" target="_blank" rel="noopener" style="display:inline-block;padding:8px 14px;margin:4px 2px;background:#0d6e66;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">' + d.name + '</a>'
-            ).join('');
-            const msgEl = document.getElementById('errorMessage');
-            if (msgEl) {
-                msgEl.style.display = 'block';
-                msgEl.style.background = '#fff8e1';
-                msgEl.style.border = '1.5px solid #e8c840';
-                msgEl.style.color = '#444';
-                msgEl.style.borderRadius = '12px';
-                msgEl.style.padding = '16px 18px';
-                msgEl.innerHTML = '<strong>📸 Instagram blocks server downloads</strong><br><span style="font-size:13px;">' + data.instruction + '</span><br><br><strong>Free tools that work:</strong><br>' + links + '<br><br><a href="' + data.openUrl + '" target="_blank" rel="noopener" style="color:#0d6e66;font-weight:600;font-size:13px;">↗️ Open post in new tab → save from app</a>';
-            }
-
-        } else if (res.ok && data.openUrl) {
-            window.open(data.openUrl, '_blank');
-            showSuccess('📱 ' + (data.instruction || 'Save the media from the app directly.'), 'errorMessage');
         } else {
-            showError('❌ Could not process this link. Please try again.', 'errorMessage');
+            showError('❌ ' + (data.instruction || 'Could not download this media. Please try a different URL.'), 'errorMessage');
         }
     } catch (err) {
         console.error('Download error:', err);

@@ -25,8 +25,9 @@ exports.handler = async (event) => {
 
   const platform = detectPlatform(url);
 
-  // 1. TikTok + YouTube: Railway yt-dlp returns base64 video
-  if (platform === 'tiktok' || platform === 'youtube') {
+  // 1. TikTok + YouTube + Instagram: Railway yt-dlp returns base64 video
+  // Instagram needs INSTAGRAM_COOKIES_B64 set on the Railway service to work.
+  if (platform === 'tiktok' || platform === 'youtube' || platform === 'instagram') {
     try {
       const result = await tryRailway(url);
       if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
@@ -57,24 +58,12 @@ exports.handler = async (event) => {
     } catch (e) { console.log('Cobalt failed:', e.message); }
   }
 
-  // 4. Instagram: embed scrape attempt, then helpful downloader links
+  // 4. Instagram: embed scrape (Railway already tried above)
   if (platform === 'instagram') {
     try {
       const result = await tryInstagramEmbed(url);
       if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'ig-embed', platform }) };
     } catch (e) { console.log('Instagram embed failed:', e.message); }
-    return {
-      statusCode: 200, headers,
-      body: JSON.stringify({
-        downloadUrl: null, openUrl: url, platform, source: 'manual',
-        instruction: 'Instagram blocks server downloads. Open in the app, tap ... then Save.',
-        downloaders: [
-          { name: 'SnapInsta', url: 'https://snapinsta.app' },
-          { name: 'SaveFrom', url: 'https://savefrom.net' },
-          { name: 'iGram', url: 'https://igram.world' }
-        ]
-      })
-    };
   }
 
   // 5. Microlink fallback
@@ -91,13 +80,14 @@ exports.handler = async (event) => {
 
   // 7. Generic fallback
   const instructions = {
-    tiktok: 'Open in TikTok app, tap Share, Save video.',
-    youtube: 'Use YouTube Premium download or save to Watch Later.',
-    x: 'Open in X, long-press image, Save image.',
-    facebook: 'Open in Facebook app, tap ..., Save.',
-    linkedin: 'Open in LinkedIn, tap ..., Save.',
-    threads: 'Open in Threads, tap Share, Save.',
-    other: 'Open the post and use the built-in save option.'
+    tiktok: 'Could not download this TikTok video. The video may be private, region-locked, or temporarily unavailable.',
+    youtube: 'Could not download this YouTube video. It may be age-restricted, members-only, or region-locked.',
+    instagram: 'Could not download this Instagram post. It may be private or temporarily unavailable.',
+    x: 'Could not download this X/Twitter media. The tweet may be protected or deleted.',
+    facebook: 'Could not download this Facebook video. The post may be private.',
+    linkedin: 'Could not download this LinkedIn video. The post may not have a publicly embedded video.',
+    threads: 'Could not download this Threads post. The post may be private.',
+    other: 'Could not download from this URL.'
   };
   return {
     statusCode: 200, headers,
