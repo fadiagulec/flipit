@@ -900,3 +900,94 @@ function showSuccess(msg, id) {
     el.style.color = '#4ade80';
     setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
+
+// ── TAB 4: IMAGE PROMPTS WIRING ──────────────────────────
+(function wireImagePromptsTab() {
+    // Niche cards — single-select
+    document.querySelectorAll('#nicheGrid .niche-card').forEach(card => {
+        card.addEventListener('click', () => {
+            document.querySelectorAll('#nicheGrid .niche-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+        });
+    });
+
+    // Event pills — single-select toggle (only one can be selected at a time)
+    document.querySelectorAll('#eventPills .event-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const wasSelected = pill.classList.contains('selected');
+            document.querySelectorAll('#eventPills .event-pill').forEach(p => p.classList.remove('selected'));
+            if (!wasSelected) pill.classList.add('selected');
+        });
+    });
+
+    const btn = document.getElementById('generateImgPromptsBtn');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        const selectedNicheEl = document.querySelector('#nicheGrid .niche-card.selected');
+        const niche = selectedNicheEl ? selectedNicheEl.getAttribute('data-niche') : '';
+
+        if (!niche) {
+            showError('Please select a niche', 'imgErrorMessage');
+            return;
+        }
+
+        const selectedPillEl = document.querySelector('#eventPills .event-pill.selected');
+        const pillEvent = selectedPillEl ? selectedPillEl.getAttribute('data-event') : '';
+        const customEvent = (document.getElementById('imgCustomEvent').value || '').trim();
+        const event = customEvent || pillEvent || '';
+        const style = document.getElementById('imgStyle').value || 'Instagram feed photos';
+        const imgCount = document.getElementById('imgCount').value || '5';
+        const imgExtra = (document.getElementById('imgExtra').value || '').trim();
+
+        // Build a synthetic "flipped script" describing the user's intent
+        const intentSubject = event || imgExtra || niche;
+        const flippedScript = `${niche} content about ${intentSubject} in ${style} style`;
+
+        const container = document.getElementById('imgResultsContainer');
+        container.innerHTML = '';
+
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Generating...';
+
+        try {
+            const prompts = buildImagePrompts(flippedScript, '', null, parseInt(imgCount, 10));
+
+            if (!prompts || prompts.length === 0) {
+                showError('No prompts could be generated. Try different inputs.', 'imgErrorMessage');
+                return;
+            }
+
+            prompts.forEach(({ label, prompt }) => {
+                // Append imgExtra as a suffix before the technical specs (which start with " Shot on")
+                let finalPrompt = prompt;
+                if (imgExtra) {
+                    const techMarker = ' Shot on';
+                    const idx = finalPrompt.indexOf(techMarker);
+                    const extraSuffix = `. Extra details: ${imgExtra}`;
+                    if (idx !== -1) {
+                        finalPrompt = finalPrompt.slice(0, idx) + extraSuffix + finalPrompt.slice(idx);
+                    } else {
+                        finalPrompt = finalPrompt + extraSuffix;
+                    }
+                }
+
+                const div = document.createElement('div');
+                div.className = 'result-section';
+                div.innerHTML = `<h3>${escapeHtml(label)}</h3><p class="result-text" style="white-space:pre-wrap;">${escapeHtml(finalPrompt)}</p>`;
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'copy-btn';
+                copyBtn.textContent = '\u{1F4CB} Copy';
+                copyBtn.onclick = () => copyToClipboard(copyBtn);
+                div.appendChild(copyBtn);
+                container.appendChild(div);
+            });
+        } catch (err) {
+            showError('Something went wrong: ' + err.message, 'imgErrorMessage');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    });
+})();

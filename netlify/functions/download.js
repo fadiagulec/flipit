@@ -2,7 +2,6 @@
 // TikTok/YouTube -> Railway yt-dlp (base64), Twitter/X -> syndication API,
 // Instagram -> embed scrape + downloader links, others -> Cobalt/Microlink/OG
 
-const fetch = require('node-fetch');
 const COBALT_URL  = 'https://cobalt-api-production-4129.up.railway.app/';
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
 
@@ -42,7 +41,15 @@ exports.handler = async (event) => {
     } catch (e) { console.log('Twitter failed:', e.message); }
   }
 
-  // 3. Cobalt for non-Instagram platforms
+  // 3. LinkedIn: scrape page for embedded video URLs before falling back
+  if (platform === 'linkedin') {
+    try {
+      const result = await tryLinkedIn(url);
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'linkedin-scrape', platform }) };
+    } catch (e) { console.log('LinkedIn scrape failed:', e.message); }
+  }
+
+  // 4. Cobalt for non-Instagram platforms
   if (platform !== 'instagram') {
     try {
       const result = await tryCobalt(url);
@@ -232,6 +239,76 @@ async function tryInstagramEmbed(url) {
       const m = html.match(p);
       if (m && m[1] && m[1].startsWith('http') && !m[1].includes('150x150')) {
         return { downloadUrl: m[1].replace(/\\u0026/g, '&').replace(/\\/g, ''), type: 'image', filename: 'instagram_' + sc + '.jpg' };
+      }
+    }
+  } catch (e) { clearTimeout(timeout); }
+  return null;
+}
+
+async function tryLinkedIn(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      redirect: 'follow', signal: controller.signal
+    });
+    clearTimeout(timeout);
+    const html = await res.text();
+
+    const cleanUrl = (s) => s.replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\\//g, '/').replace(/\\/g, '');
+
+    // a. og:video meta tags
+    const ogVideoPatterns = [
+      /property=["']og:video:secure_url["']\s+content=["']([^"']+)["']/i,
+      /property=["']og:video["']\s+content=["']([^"']+)["']/i,
+      /content=["']([^"']+)["']\s+property=["']og:video:secure_url["']/i,
+      /content=["']([^"']+)["']\s+property=["']og:video["']/i
+    ];
+    for (const p of ogVideoPatterns) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http')) {
+        return { downloadUrl: cleanUrl(m[1]), type: 'video', filename: 'linkedin.mp4' };
+      }
+    }
+
+    // b. progressiveStreams JSON pattern (LinkedIn video player config)
+    const progMatch = html.match(/"progressiveStreams":\s*\[\s*\{[^}]*?"streamingLocations":\s*\[\s*\{[^}]*?"url":\s*"([^"]+)"/);
+    if (progMatch && progMatch[1] && progMatch[1].startsWith('http')) {
+      return { downloadUrl: cleanUrl(progMatch[1]), type: 'video', filename: 'linkedin.mp4' };
+    }
+
+    // c. contentUrl pointing to mp4
+    const contentUrlMatch = html.match(/"contentUrl":\s*"([^"]+\.mp4[^"]*)"/);
+    if (contentUrlMatch && contentUrlMatch[1] && contentUrlMatch[1].startsWith('http')) {
+      return { downloadUrl: cleanUrl(contentUrlMatch[1]), type: 'video', filename: 'linkedin.mp4' };
+    }
+
+    // d. nested "video":{"url":"..."} patterns
+    const videoObjPatterns = [
+      /"video":\s*\{[^}]*?"url":\s*"([^"]+)"/,
+      /"videoPlayMetadata"[\s\S]{0,500}?"url":\s*"([^"]+\.mp4[^"]*)"/
+    ];
+    for (const p of videoObjPatterns) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http')) {
+        return { downloadUrl: cleanUrl(m[1]), type: 'video', filename: 'linkedin.mp4' };
+      }
+    }
+
+    // Image post fallback: og:image
+    const ogImagePatterns = [
+      /property=["']og:image["']\s+content=["']([^"']+)["']/i,
+      /content=["']([^"']+)["']\s+property=["']og:image["']/i
+    ];
+    for (const p of ogImagePatterns) {
+      const m = html.match(p);
+      if (m && m[1] && m[1].startsWith('http')) {
+        return { downloadUrl: cleanUrl(m[1]), type: 'image', filename: 'linkedin.jpg' };
       }
     }
   } catch (e) { clearTimeout(timeout); }
