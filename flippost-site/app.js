@@ -104,19 +104,19 @@ function sniffMediaType(bytes) {
     return null;
 }
 
-// Force-download a file from URL. Validates the response is actually media
-// (rejects HTML/JSON error pages), uses magic-byte sniffing to set the
-// correct file extension and MIME, and only falls back to opening the URL
-// in a new tab if the in-page fetch genuinely fails.
+// Force-download a file from URL. Tries direct fetch first (works for
+// CORS-friendly sources like Cobalt tunnels). If that fails (LinkedIn /
+// Twitter CDN block CORS), falls back to a same-origin server-side proxy
+// that forces Content-Disposition: attachment so the browser actually
+// downloads instead of opening the file in a new tab.
 async function forceDownload(mediaUrl, filename) {
+    // Attempt 1: direct fetch + blob (CORS-friendly URLs)
     try {
         const res = await fetch(mediaUrl);
         if (!res.ok) throw new Error('HTTP ' + res.status);
 
         const buf = await res.arrayBuffer();
-        if (!buf || buf.byteLength < 1024) {
-            throw new Error('response too small (' + buf.byteLength + ' bytes) — likely an error page');
-        }
+        if (!buf || buf.byteLength < 1024) throw new Error('response too small');
 
         const bytes = new Uint8Array(buf);
         const sniffed = sniffMediaType(bytes);
@@ -128,9 +128,7 @@ async function forceDownload(mediaUrl, filename) {
 
         const mime = sniffed ? sniffed.mime : (headerType.split(';')[0] || 'application/octet-stream');
         let finalName = filename || 'flipit-media';
-        if (sniffed) {
-            finalName = finalName.replace(/\.[a-z0-9]{2,4}$/i, '') + sniffed.ext;
-        }
+        if (sniffed) finalName = finalName.replace(/\.[a-z0-9]{2,4}$/i, '') + sniffed.ext;
 
         const blob = new Blob([bytes], { type: mime });
         const blobUrl = URL.createObjectURL(blob);
@@ -142,17 +140,44 @@ async function forceDownload(mediaUrl, filename) {
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
         return true;
-    } catch (e) {
-        console.error('forceDownload failed:', e.message);
+    } catch (directErr) {
+        console.warn('Direct fetch failed:', directErr.message, '— trying server proxy');
+    }
+
+    // Attempt 2: same-origin proxy (forces Content-Disposition: attachment).
+    // The proxy fetches the URL server-side and streams it back, so CORS
+    // doesn't block us and the browser is forced to download.
+    try {
+        const proxyUrl = '/.netlify/functions/proxy-download?url=' + encodeURIComponent(mediaUrl) +
+                         (filename ? '&filename=' + encodeURIComponent(filename) : '');
+        const res = await fetch(proxyUrl);
+        if (res.status === 413) throw new Error('File too large to proxy — try a shorter clip');
+        if (!res.ok) throw new Error('proxy HTTP ' + res.status);
+
+        const buf = await res.arrayBuffer();
+        if (!buf || buf.byteLength < 1024) throw new Error('proxy response too small');
+
+        const bytes = new Uint8Array(buf);
+        const sniffed = sniffMediaType(bytes);
+        const headerType = (res.headers.get('Content-Type') || '').toLowerCase();
+        const mime = sniffed ? sniffed.mime : (headerType.split(';')[0] || 'application/octet-stream');
+
+        let finalName = filename || 'flipit-media';
+        if (sniffed) finalName = finalName.replace(/\.[a-z0-9]{2,4}$/i, '') + sniffed.ext;
+
+        const blob = new Blob([bytes], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = mediaUrl;
-        a.download = filename || 'flipit-media';
-        a.target = '_blank';
-        a.rel = 'noopener';
+        a.href = blobUrl;
+        a.download = finalName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        return false;
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+        return true;
+    } catch (proxyErr) {
+        console.error('Proxy download failed:', proxyErr.message);
+        throw proxyErr;
     }
 }
 
@@ -222,9 +247,13 @@ async function handleDownload() {
                 window._lastCarouselUrls = [data.downloadUrl];
                 const ext = data.type === 'video' ? '.mp4' : '.jpg';
                 const fname = data.filename || `flipit-${platform || 'media'}${ext}`;
-                await forceDownload(data.downloadUrl, fname);
-                const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
-                showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
+                try {
+                    await forceDownload(data.downloadUrl, fname);
+                    const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
+                    showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
+                } catch (dlErr) {
+                    showError('\u274C ' + (dlErr.message || 'Download failed') + '. The file may be too large \u2014 try a shorter clip.', 'errorMessage');
+                }
             }
         } else {
             showError('❌ ' + (data.instruction || 'Could not download this media. Please try a different URL.'), 'errorMessage');
@@ -474,27 +503,39 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
     container.appendChild(btnRow);
 
-    // Video Prompt click handler
-    videoBtn.addEventListener('click', () => {
+    // Video Prompt click handler — calls Claude via /video-prompts
+    videoBtn.addEventListener('click', async () => {
         const existing = container.querySelector('.video-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
-        const promptText = buildVideoPrompt(flippedScript, platform);
-        const div = document.createElement('div');
-        div.className = 'result-section video-prompt-section';
-        div.innerHTML = `
-            <h3>\u{1F3AC} Video Creation Prompt</h3>
-            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
-            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
-        `;
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
-        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
-        copyBtn.onclick = () => copyToClipboard(copyBtn);
-        div.appendChild(copyBtn);
-        container.appendChild(div);
-        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const wrap = document.createElement('div');
+        wrap.className = 'result-section video-prompt-section';
+        wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">AI is writing prompts that match your script. Paste into Runway, Pika, Kling, Sora, or Luma.</p><p class="result-text" style="color:#999;">⏳ Generating prompts…</p>`;
+        container.appendChild(wrap);
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        try {
+            const res = await fetch('/.netlify/functions/video-prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ flippedScript, platform })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
+
+            const promptsHtml = data.prompts.map(p =>
+                `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
+                    <p style="color:#0d6e66;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
+                    <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
+                    <button class="copy-btn" style="background:#0d6e66;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                </div>`
+            ).join('');
+            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p>${promptsHtml}`;
+        } catch (err) {
+            console.error('Video prompt error:', err);
+            wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
+            wrap.querySelector('.result-text').style.color = '#c2185b';
+        }
     });
 
     // Image Prompt click handler — AI Vision analyzes actual downloaded images
@@ -563,8 +604,42 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
             imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
 
         } else {
-            // No images downloaded — tell user to download first
-            showError('Download images first, then click Image Prompt to analyze them.', 'errorMessage');
+            // No images downloaded — generate prompts FROM THE SCRIPT via Claude
+            imageBtn.disabled = true;
+            imageBtn.textContent = '⏳ Generating prompts...';
+
+            const div = document.createElement('div');
+            div.className = 'result-section image-prompt-section';
+            div.style.borderLeftColor = '#c2185b';
+            div.innerHTML = `<h3>\u{1F5BC}️ AI Image Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:14px;">Generating prompts that illustrate your script…</p><p class="result-text" style="color:#999;">⏳ Working on it…</p>`;
+            container.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            try {
+                const res = await fetch('/.netlify/functions/image-prompts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ flippedScript, platform, count: 5 })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
+
+                const promptsHtml = data.prompts.map(p =>
+                    `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
+                        <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
+                        <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
+                        <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                    </div>`
+                ).join('');
+                div.innerHTML = `<h3>\u{1F5BC}️ AI Image Prompts — ${data.prompts.length} ideas</h3><p style="color:#777;font-size:14px;margin-bottom:14px;">Paste each into Midjourney, DALL-E, Ideogram, or Leonardo.</p>${promptsHtml}`;
+            } catch (err) {
+                console.error('Image prompt error:', err);
+                div.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate image prompts');
+                div.querySelector('.result-text').style.color = '#c2185b';
+            } finally {
+                imageBtn.disabled = false;
+                imageBtn.textContent = '\u{1F5BC}️ IMAGE PROMPT';
+            }
         }
     });
 }
@@ -758,26 +833,38 @@ function appendVideoPromptSection(container, flippedScript, platform) {
     triggerWrap.appendChild(triggerBtn);
     container.appendChild(triggerWrap);
 
-    triggerBtn.addEventListener('click', () => {
+    triggerBtn.addEventListener('click', async () => {
         const existing = container.querySelector('.video-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
-        const promptText = buildVideoPrompt(flippedScript, platform);
-        const div = document.createElement('div');
-        div.className = 'result-section video-prompt-section';
-        div.innerHTML = `
-            <h3>\u{1F3AC} Video Creation Prompt</h3>
-            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
-            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
-        `;
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
-        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
-        copyBtn.onclick = () => copyToClipboard(copyBtn);
-        div.appendChild(copyBtn);
-        container.appendChild(div);
-        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const wrap = document.createElement('div');
+        wrap.className = 'result-section video-prompt-section';
+        wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">AI is writing prompts that match your script.</p><p class="result-text" style="color:#999;">⏳ Generating prompts…</p>`;
+        container.appendChild(wrap);
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        try {
+            const res = await fetch('/.netlify/functions/video-prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ flippedScript, platform })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
+
+            const promptsHtml = data.prompts.map(p =>
+                `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
+                    <p style="color:#0d6e66;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
+                    <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
+                    <button class="copy-btn" style="background:#0d6e66;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                </div>`
+            ).join('');
+            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p>${promptsHtml}`;
+        } catch (err) {
+            console.error('Video prompt error:', err);
+            wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
+            wrap.querySelector('.result-text').style.color = '#c2185b';
+        }
     });
 }
 
@@ -957,7 +1044,7 @@ function showSuccess(msg, id) {
     const btn = document.getElementById('generateImgPromptsBtn');
     if (!btn) return;
 
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
         const selectedNicheEl = document.querySelector('#nicheGrid .niche-card.selected');
         const niche = selectedNicheEl ? selectedNicheEl.getAttribute('data-niche') : '';
 
@@ -969,47 +1056,33 @@ function showSuccess(msg, id) {
         const selectedPillEl = document.querySelector('#eventPills .event-pill.selected');
         const pillEvent = selectedPillEl ? selectedPillEl.getAttribute('data-event') : '';
         const customEvent = (document.getElementById('imgCustomEvent').value || '').trim();
-        const event = customEvent || pillEvent || '';
         const style = document.getElementById('imgStyle').value || 'Instagram feed photos';
-        const imgCount = document.getElementById('imgCount').value || '5';
-        const imgExtra = (document.getElementById('imgExtra').value || '').trim();
-
-        // Build a synthetic "flipped script" describing the user's intent
-        const intentSubject = event || imgExtra || niche;
-        const flippedScript = `${niche} content about ${intentSubject} in ${style} style`;
+        const count = parseInt(document.getElementById('imgCount').value || '5', 10);
+        const extra = (document.getElementById('imgExtra').value || '').trim();
 
         const container = document.getElementById('imgResultsContainer');
-        container.innerHTML = '';
+        container.innerHTML = '<div class="loading">⏳ AI is writing prompts specifically for your niche…</div>';
 
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = '⏳ Generating...';
 
         try {
-            const prompts = buildImagePrompts(flippedScript, '', null, parseInt(imgCount, 10));
-
-            if (!prompts || prompts.length === 0) {
-                showError('No prompts could be generated. Try different inputs.', 'imgErrorMessage');
-                return;
+            const res = await fetch('/.netlify/functions/image-prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ niche, event: pillEvent, customEvent, style, count, extra })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.prompts || data.prompts.length === 0) {
+                throw new Error(data.error || 'No prompts generated');
             }
 
-            prompts.forEach(({ label, prompt }) => {
-                // Append imgExtra as a suffix before the technical specs (which start with " Shot on")
-                let finalPrompt = prompt;
-                if (imgExtra) {
-                    const techMarker = ' Shot on';
-                    const idx = finalPrompt.indexOf(techMarker);
-                    const extraSuffix = `. Extra details: ${imgExtra}`;
-                    if (idx !== -1) {
-                        finalPrompt = finalPrompt.slice(0, idx) + extraSuffix + finalPrompt.slice(idx);
-                    } else {
-                        finalPrompt = finalPrompt + extraSuffix;
-                    }
-                }
-
+            container.innerHTML = '';
+            data.prompts.forEach(({ label, prompt }) => {
                 const div = document.createElement('div');
                 div.className = 'result-section';
-                div.innerHTML = `<h3>${escapeHtml(label)}</h3><p class="result-text" style="white-space:pre-wrap;">${escapeHtml(finalPrompt)}</p>`;
+                div.innerHTML = `<h3>${escapeHtml(label || 'Prompt')}</h3><p class="result-text" style="white-space:pre-wrap;">${escapeHtml(prompt)}</p>`;
                 const copyBtn = document.createElement('button');
                 copyBtn.className = 'copy-btn';
                 copyBtn.textContent = '\u{1F4CB} Copy';
@@ -1018,7 +1091,9 @@ function showSuccess(msg, id) {
                 container.appendChild(div);
             });
         } catch (err) {
-            showError('Something went wrong: ' + err.message, 'imgErrorMessage');
+            console.error('Image prompts error:', err);
+            container.innerHTML = '';
+            showError('❌ ' + (err.message || 'Could not generate image prompts. Please try again.'), 'imgErrorMessage');
         } finally {
             btn.disabled = false;
             btn.textContent = originalText;
