@@ -27,19 +27,14 @@ exports.handler = async (event) => {
 
   // 1. TikTok + YouTube + Instagram: Railway yt-dlp returns base64 video
   // Instagram needs INSTAGRAM_COOKIES_B64 set on the Railway service to work.
+  // If Railway returns _tooLarge, fall through to Cobalt (which streams via
+  // a tunnel URL and isn't bound by the 6MB Netlify response cap).
+  let railwayTooLarge = null;
   if (platform === 'tiktok' || platform === 'youtube' || platform === 'instagram') {
     try {
       const result = await tryRailway(url);
       if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
-      if (result && result._tooLarge) {
-        return {
-          statusCode: 200, headers,
-          body: JSON.stringify({
-            downloadUrl: null, openUrl: url, platform, source: 'too-large',
-            instruction: `Video is too large (${result.sizeMb || '>4'} MB) to deliver through this connection. Try a shorter clip.`
-          })
-        };
-      }
+      if (result && result._tooLarge) railwayTooLarge = result.sizeMb;
     } catch (e) { console.log('Railway failed:', e.message); }
   }
 
@@ -59,15 +54,15 @@ exports.handler = async (event) => {
     } catch (e) { console.log('LinkedIn scrape failed:', e.message); }
   }
 
-  // 4. Cobalt for non-Instagram platforms
-  if (platform !== 'instagram') {
-    try {
-      const result = await tryCobalt(url);
-      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
-    } catch (e) { console.log('Cobalt failed:', e.message); }
-  }
+  // 4. Cobalt for ALL platforms (works for TikTok/YouTube/IG/X/FB and streams
+  // via a tunnel URL — bypasses Netlify's 6MB body cap, so use this for
+  // anything Railway flagged as too-large too).
+  try {
+    const result = await tryCobalt(url);
+    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
+  } catch (e) { console.log('Cobalt failed:', e.message); }
 
-  // 4. Instagram: embed scrape (Railway already tried above)
+  // 5. Instagram embed scrape (last shot before giving up)
   if (platform === 'instagram') {
     try {
       const result = await tryInstagramEmbed(url);
@@ -98,9 +93,13 @@ exports.handler = async (event) => {
     threads: 'Could not download this Threads post. The post may be private.',
     other: 'Could not download from this URL.'
   };
+  let finalMessage = instructions[platform] || instructions.other;
+  if (railwayTooLarge) {
+    finalMessage = `Video is ${railwayTooLarge} MB — too large to deliver through this connection, and the streaming fallback couldn't access it either. Try a shorter clip.`;
+  }
   return {
     statusCode: 200, headers,
-    body: JSON.stringify({ downloadUrl: null, openUrl: url, platform, source: 'manual', instruction: instructions[platform] || instructions.other })
+    body: JSON.stringify({ downloadUrl: null, openUrl: url, platform, source: 'manual', instruction: finalMessage })
   };
 };
 
