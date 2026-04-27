@@ -134,6 +134,96 @@
         }
         .btn-outline:hover { background: #0d6e66; color: #fff; }
 
+        /* Free trial CTA — primary green */
+        .btn-trial {
+            background: linear-gradient(135deg, #0d6e66, #14a89a);
+            color: #fff;
+            border: 2px solid #0d6e66;
+        }
+        .btn-trial:hover { transform: translateY(-3px); box-shadow: 0 14px 40px rgba(13,110,102,0.4); }
+
+        /* Secondary unlock CTA — outlined */
+        .btn-unlock {
+            background: #fff;
+            color: #0d6e66;
+            border: 2px solid #0d6e66;
+            padding: 16px 32px;
+            font-size: 15px;
+        }
+        .btn-unlock:hover { background: #0d6e66; color: #fff; transform: translateY(-3px); box-shadow: 0 12px 30px rgba(13,110,102,0.25); }
+
+        .hero-subtag {
+            color: #555;
+            font-size: 16px;
+            margin-top: 12px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Founder pricing urgency banner */
+        .urgency-banner {
+            background: #fff8e1;
+            border: 2px solid #e8c840;
+            border-radius: 12px;
+            padding: 14px 18px;
+            text-align: center;
+            margin: 0 auto 16px;
+            max-width: 520px;
+            font-size: 15px;
+            color: #6b4f00;
+            font-weight: 600;
+        }
+        .urgency-banner strong { color: #1a1a2e; }
+
+        /* Free vs Pro comparison table */
+        .compare-wrap {
+            max-width: 720px;
+            margin: 56px auto 0;
+            padding: 0 8px;
+        }
+        .compare-title {
+            text-align: center;
+            font-size: 24px;
+            font-weight: 800;
+            color: #1a1a2e;
+            margin-bottom: 20px;
+        }
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.05);
+            border: 1px solid #e8e4de;
+        }
+        .compare-table th, .compare-table td {
+            padding: 14px 18px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            font-size: 15px;
+            color: #444;
+            vertical-align: top;
+        }
+        .compare-table thead th {
+            background: #faf8f5;
+            font-weight: 800;
+            font-size: 16px;
+            color: #1a1a2e;
+            border-bottom: 2px solid #e8e4de;
+        }
+        .compare-table th.col-feature { color: #777; font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; }
+        .compare-table th.col-pro, .compare-table td.col-pro {
+            background: #f0faf8;
+            border-left: 2px solid #0d6e66;
+            border-right: 2px solid #0d6e66;
+        }
+        .compare-table tbody tr:last-child th, .compare-table tbody tr:last-child td { border-bottom: none; }
+        .compare-table .row-label { color: #1a1a2e; font-weight: 600; }
+        .compare-table .check { color: #0d6e66; font-weight: 700; }
+        .compare-table .dash { color: #bbb; }
+
         /* ── Price Card Inline ── */
         .price-inline {
             display: inline-flex;
@@ -346,6 +436,34 @@
             .cta-group { flex-direction: column; align-items: center; }
             .btn { width: 100%; max-width: 360px; text-align: center; }
             .example-grid { grid-template-columns: 1fr !important; }
+
+            /* Comparison table → stacked card layout on mobile */
+            .compare-table thead { display: none; }
+            .compare-table, .compare-table tbody, .compare-table tr, .compare-table th, .compare-table td { display: block; width: 100%; }
+            .compare-table tr {
+                margin-bottom: 16px;
+                border: 1px solid #e8e4de;
+                border-radius: 12px;
+                overflow: hidden;
+                background: #fff;
+            }
+            .compare-table th.col-feature {
+                background: #faf8f5;
+                border-bottom: 1px solid #e8e4de;
+                padding: 10px 16px;
+            }
+            .compare-table td { border-bottom: 1px solid #f0f0f0; padding: 10px 16px; }
+            .compare-table td::before {
+                content: attr(data-label);
+                display: block;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #888;
+                font-weight: 700;
+                margin-bottom: 4px;
+            }
+            .compare-table td.col-pro { border-left: none; border-right: none; border-top: 2px solid #0d6e66; }
         }
     </style>
 </head>
@@ -354,7 +472,7 @@
 <!-- NAV -->
 <nav>
     <a href="#" class="nav-logo">FlipIt</a>
-    <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="nav-cta">Get Access — $37</a>
+    <a href="https://flipit-app.netlify.app/" class="nav-cta">Try Free &rarr;</a>
 </nav>
 
 <!-- HERO -->
@@ -362,6 +480,7 @@
     <div class="container">
         <div class="badge">AI-Powered Viral Script Generator</div>
         <h1>See It. Flip It.<br>Post It. Go Viral.</h1>
+        <p class="hero-subtag">Try every feature free for 7 days. Pay $37 once for lifetime access — no subscription.</p>
         <p class="hero-sub">
             Paste any post URL or script and FlipIt rewrites it with a fresh angle, a scroll-stopping hook,
             and a ready-to-paste AI video prompt — in under 60 seconds.
@@ -383,10 +502,10 @@
         </div>
 
         <div class="cta-group">
-            <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="btn btn-primary">Get Instant Access — $37</a>
-            <a href="#how-it-works" class="btn btn-outline">See How It Works</a>
+            <a href="https://flipit-app.netlify.app/" class="btn btn-trial">&#128640; Try Free for 7 Days</a>
+            <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="btn btn-unlock">&#9889; Unlock Pro — $37</a>
         </div>
-        <p style="margin-top:20px;color:#999;font-size:14px;">30-day money-back guarantee · One-time payment · No subscriptions</p>
+        <p style="margin-top:20px;color:#999;font-size:14px;">7-day free trial · No credit card · 30-day money-back guarantee on Pro</p>
     </div>
 </section>
 
@@ -505,7 +624,10 @@
 <section class="alt" id="pricing">
     <div class="container">
         <h2 class="section-title">Simple, One-Time Pricing</h2>
-        <p class="section-sub">Pay once. Use forever. No subscriptions.</p>
+        <p class="section-sub">Start free. Upgrade once. Use forever — no subscriptions.</p>
+        <div class="urgency-banner" id="urgency-banner">
+            &#128293; <strong>Founder's Pricing Ends in <span id="countdown-days">14</span> days</strong> — locked in at $37. Rises to $67 after that.
+        </div>
         <div class="pricing-card">
             <div class="pricing-badge">Launch Offer</div>
             <h3>FlipIt Pro</h3>
@@ -526,6 +648,67 @@
                 Get Instant Access — $37
             </a>
             <p style="margin-top:18px;color:#999;font-size:14px;">30-day money-back guarantee. If FlipIt doesn't save you time, we'll refund you in full.</p>
+        </div>
+
+        <!-- FREE vs PRO COMPARISON -->
+        <div class="compare-wrap">
+            <h3 class="compare-title">Free vs Pro</h3>
+            <table class="compare-table">
+                <thead>
+                    <tr>
+                        <th class="col-feature">Feature</th>
+                        <th>Free</th>
+                        <th class="col-pro">Pro</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th class="row-label">Trial</th>
+                        <td data-label="Free">7-day full access</td>
+                        <td class="col-pro" data-label="Pro">Always on</td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Daily flips after trial</th>
+                        <td data-label="Free">3 / day</td>
+                        <td class="col-pro" data-label="Pro">Unlimited</td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">URL extraction &amp; rewrite</th>
+                        <td data-label="Free"><span class="check">&#10003;</span></td>
+                        <td class="col-pro" data-label="Pro"><span class="check">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">AI Hooks + CTAs</th>
+                        <td data-label="Free"><span class="check">&#10003;</span></td>
+                        <td class="col-pro" data-label="Pro"><span class="check">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Video Prompts</th>
+                        <td data-label="Free"><span class="check">&#10003;</span></td>
+                        <td class="col-pro" data-label="Pro"><span class="check">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Image Prompts (Tab 4)</th>
+                        <td data-label="Free">1 / day</td>
+                        <td class="col-pro" data-label="Pro">Unlimited</td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Image Vision Analysis (carousels)</th>
+                        <td data-label="Free">Pro only</td>
+                        <td class="col-pro" data-label="Pro"><span class="check">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Lifetime updates</th>
+                        <td data-label="Free"><span class="dash">&mdash;</span></td>
+                        <td class="col-pro" data-label="Pro"><span class="check">&#10003;</span></td>
+                    </tr>
+                    <tr>
+                        <th class="row-label">Price</th>
+                        <td data-label="Free">$0 forever</td>
+                        <td class="col-pro" data-label="Pro"><strong>$37 one-time</strong></td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     </div>
 </section>
@@ -550,6 +733,8 @@
         <p>&copy; 2026 FlipIt · All rights reserved · <a href="mailto:fadiagulec@gmail.com">Contact</a> · <a href="mailto:fadiagulec@gmail.com?subject=FlipIt%20Refund%20Request">30-Day Refund Policy</a></p>
     </div>
 </footer>
+
+<script src="landing-countdown.js"></script>
 
 </body>
 </html>

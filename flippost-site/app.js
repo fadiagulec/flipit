@@ -22,6 +22,91 @@ const platformEmojis = {
     threads: '\u{1F9F5}'
 };
 
+
+// ── ACCESS GATING (FlipItAccess from access.js) ─────────────
+// Returns true if user can flip; otherwise shows paywall and returns false.
+function gateOrPaywall() {
+    if (!window.FlipItAccess) return true; // safety: lib not loaded, allow
+    window.FlipItAccess.markFirstUseIfMissing();
+    const state = window.FlipItAccess.getState();
+    if (state.canFlip) return true;
+    showPaywallModal(state);
+    return false;
+}
+
+function recordFlipSuccess() {
+    if (window.FlipItAccess) window.FlipItAccess.recordFlip();
+    renderTrialBanner();
+}
+
+function showPaywallModal(state) {
+    let modal = document.getElementById('flipit-paywall');
+    if (modal) { modal.style.display = 'flex'; return; }
+    modal = document.createElement('div');
+    modal.id = 'flipit-paywall';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:16px;padding:36px 32px;max-width:480px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);position:relative;';
+    const h3 = document.createElement('h3');
+    h3.style.cssText = 'font-size:24px;color:#1a1a2e;margin:0 0 12px;line-height:1.3;';
+    h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
+    card.appendChild(h3);
+    const p1 = document.createElement('p');
+    p1.style.cssText = 'color:#555;margin:0 0 24px;line-height:1.5;';
+    const daysSince = Math.max(0, (state.daysSinceFirstUse || 0) - 7);
+    p1.textContent = daysSince > 0
+        ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or unlock unlimited now.`
+        : 'Free tier resets at midnight \u2014 or unlock unlimited now.';
+    card.appendChild(p1);
+    const a = document.createElement('a');
+    a.href = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:12px;';
+    a.textContent = '\u26A1 Unlock Pro \u2014 $37 Lifetime';
+    card.appendChild(a);
+    const p2 = document.createElement('p');
+    p2.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;';
+    p2.textContent = 'One-time payment \u00B7 No subscription \u00B7 30-day refund';
+    card.appendChild(p2);
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.style.cssText = 'position:absolute;top:12px;right:14px;background:none;border:none;color:#999;font-size:24px;cursor:pointer;line-height:1;padding:4px 8px;';
+    closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+    card.appendChild(closeBtn);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+}
+
+function renderTrialBanner() {
+    if (!window.FlipItAccess) return;
+    const state = window.FlipItAccess.getState();
+    const existing = document.getElementById('flipit-trial-banner');
+    if (existing) existing.remove();
+    if (state.isPro) return; // pro users skip banner
+    const banner = document.createElement('div');
+    banner.id = 'flipit-trial-banner';
+    banner.style.cssText = 'background:linear-gradient(135deg,#fff8e1,#fff3c4);border-bottom:1px solid #e8c840;padding:10px 16px;text-align:center;font-size:14px;color:#5a4a00;line-height:1.4;';
+    const cta = ' <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" target="_blank" rel="noopener" style="color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;">Lock in $37 lifetime \u2192</a>';
+    if (state.isWithinTrial) {
+        const d = state.daysRemainingInTrial;
+        banner.innerHTML = `\u{1F381} <strong>Free trial active</strong> \u2014 ${d} day${d === 1 ? '' : 's'} left of unlimited access.${cta}`;
+    } else {
+        const remaining = Math.max(0, state.dailyLimit - state.dailyCount);
+        banner.innerHTML = `\u{1F4CA} <strong>Free tier:</strong> ${remaining} of ${state.dailyLimit} flip${state.dailyLimit === 1 ? '' : 's'} left today.${cta}`;
+    }
+    document.body.insertBefore(banner, document.body.firstChild);
+}
+
+// Render banner on page load
+if (typeof window !== 'undefined' && document.readyState !== 'loading') {
+    renderTrialBanner();
+} else if (typeof window !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', renderTrialBanner);
+}
+
 // Initialize tab navigation
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -187,6 +272,7 @@ async function handleDownload() {
     const urlInput = document.getElementById('urlInput');
     const url = urlInput.value.trim();
     if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
+    if (!gateOrPaywall()) return;
 
     const platform = detectPlatform(url);
     const btn = document.getElementById('downloadBtn');
@@ -406,6 +492,7 @@ document.getElementById('extractBtn').addEventListener('click', handleExtractAnd
 async function handleExtractAndTwist() {
     const url = document.getElementById('urlInput').value.trim();
     if (!url) { showError('Please enter a URL', 'errorMessage'); return; }
+    if (!gateOrPaywall()) return;
 
     const platform = detectPlatform(url);
     if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
@@ -445,6 +532,7 @@ async function handleExtractAndTwist() {
         }
 
         displayResults(data, platform);
+        recordFlipSuccess();
     } catch (err) {
         container.innerHTML = `
             <div class="result-section" style="border-left:4px solid #ff4444;padding:16px;">
@@ -613,6 +701,7 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
     // Video Prompt click handler — calls Claude via /video-prompts
     videoBtn.addEventListener('click', async () => {
+        if (!gateOrPaywall()) return;
         const existing = container.querySelector('.video-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
@@ -633,6 +722,7 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
             wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p><div data-cards></div>`;
             renderPromptCards(wrap.querySelector('[data-cards]'), data.prompts, '#0d6e66');
+            recordFlipSuccess();
         } catch (err) {
             console.error('Video prompt error:', err);
             wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
@@ -642,6 +732,7 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
     // Image Prompt click handler — AI Vision analyzes actual downloaded images
     imageBtn.addEventListener('click', async () => {
+        if (!gateOrPaywall()) return;
         const existing = container.querySelector('.image-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
@@ -748,6 +839,7 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
 
 
                 renderPromptCards(div.querySelector('[data-cards]'), data.prompts, '#c2185b');
+            recordFlipSuccess();
             } catch (err) {
                 console.error('Image prompt error:', err);
                 div.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate image prompts');
@@ -950,6 +1042,7 @@ function appendVideoPromptSection(container, flippedScript, platform) {
     container.appendChild(triggerWrap);
 
     triggerBtn.addEventListener('click', async () => {
+        if (!gateOrPaywall()) return;
         const existing = container.querySelector('.video-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
@@ -970,6 +1063,7 @@ function appendVideoPromptSection(container, flippedScript, platform) {
 
             wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p><div data-cards></div>`;
             renderPromptCards(wrap.querySelector('[data-cards]'), data.prompts, '#0d6e66');
+            recordFlipSuccess();
         } catch (err) {
             console.error('Video prompt error:', err);
             wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
@@ -986,6 +1080,7 @@ document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScr
 async function handleRewriteScript() {
     const script = document.getElementById('scriptInput').value.trim();
     if (!script) { showError('Please paste a script or caption', 'scriptErrorMessage'); return; }
+    if (!gateOrPaywall()) return;
 
     const btn = document.getElementById('rewriteBtn');
     const orig = btn.textContent;
@@ -1010,6 +1105,7 @@ async function handleRewriteScript() {
         appendSection(container, '\u2728 Flipped Version', data.rewritten, true);
         if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
         if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
+        recordFlipSuccess();
 
         // Video + Image prompts
         if (data.rewritten) {
@@ -1033,6 +1129,7 @@ async function handleGenerateIdeas() {
     const niche = document.getElementById('nicheInput').value.trim();
     const description = document.getElementById('nicheDescription').value.trim();
     if (!niche || !description) { showError('Please fill in both fields', 'ideasErrorMessage'); return; }
+    if (!gateOrPaywall()) return;
 
     const btn = document.getElementById('generateIdeasBtn');
     const orig = btn.textContent;
@@ -1055,6 +1152,7 @@ async function handleGenerateIdeas() {
         container.innerHTML = '';
         appendSection(container, '\u{1F4A1} Your Viral Content Ideas', data.twisted, true);
         if (data.prompt) appendSection(container, '\u{1F3AF} Pro Tips', data.prompt, true);
+        recordFlipSuccess();
     } catch (err) {
         showError(`Error: ${err.message}`, 'ideasErrorMessage');
         container.innerHTML = '';
@@ -1155,6 +1253,7 @@ function showSuccess(msg, id) {
     if (!btn) return;
 
     btn.addEventListener('click', async () => {
+        if (!gateOrPaywall()) return;
         const selectedNicheEl = document.querySelector('#nicheGrid .niche-card.selected');
         const niche = selectedNicheEl ? selectedNicheEl.getAttribute('data-niche') : '';
 
