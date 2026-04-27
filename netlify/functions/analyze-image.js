@@ -47,15 +47,81 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error('Image analysis error:', err);
+    // Surface user-actionable errors (size, fetch) so the UI can guide them.
+    const msg = err && err.message ? err.message : '';
+    let userMsg = 'Image analysis failed. Please try again.';
+    if (/too large/i.test(msg)) userMsg = msg;
+    else if (/Image fetch HTTP/i.test(msg)) userMsg = 'Could not fetch this image (the source may be private or expired).';
+    else if (/empty body/i.test(msg)) userMsg = 'The image source returned empty data.';
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: 'Image analysis failed. Please try again.' })
+      body: JSON.stringify({ error: userMsg })
     };
   }
 };
 
+// Fetch the image server-side and convert to base64 so Claude Vision can
+// analyze images that block hot-linking from Anthropic's servers
+// (Instagram CDN, TikTok thumbnails, Twitter media). This is the fix for
+// "Image analysis failed" on every carousel image.
+async function fetchImageAsBase64(imageUrl) {
+  const res = await fetch(imageUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'Referer': 'https://www.google.com/'
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!res.ok) throw new Error('Image fetch HTTP ' + res.status);
+
+  const buf = await res.arrayBuffer();
+  if (!buf || buf.byteLength < 100) throw new Error('Image fetch returned empty body');
+
+  // Sniff media type from magic bytes — header from upstream is unreliable
+  const bytes = new Uint8Array(buf);
+  let mediaType = 'image/jpeg';
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) mediaType = 'image/png';
+  else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) mediaType = 'image/gif';
+  else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+           bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mediaType = 'image/webp';
+  else if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) mediaType = 'image/jpeg';
+
+  // Anthropic supports up to ~5 MB per image. Reject anything larger.
+  if (buf.byteLength > 5 * 1024 * 1024) {
+    throw new Error('Image too large for analysis (' + Math.round(buf.byteLength / 1024) + ' KB)');
+  }
+
+  return {
+    mediaType,
+    base64: Buffer.from(buf).toString('base64')
+  };
+}
+
 async function analyzeImage(imageUrl, slideNumber) {
+  // Fetch first, send as base64 — works even when Anthropic can't reach
+  // the source URL (Instagram CDN tokens, expired Twitter URLs, etc.).
+  let imagePayload;
+  try {
+    const fetched = await fetchImageAsBase64(imageUrl);
+    imagePayload = {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: fetched.mediaType,
+        data: fetched.base64
+      }
+    };
+  } catch (fetchErr) {
+    console.warn('Server-side fetch failed, falling back to URL source:', fetchErr.message);
+    imagePayload = {
+      type: 'image',
+      source: { type: 'url', url: imageUrl }
+    };
+  }
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -70,13 +136,7 @@ async function analyzeImage(imageUrl, slideNumber) {
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: {
-                type: 'url',
-                url: imageUrl
-              }
-            },
+            imagePayload,
             {
               type: 'text',
               text: `You are a forensic image-to-prompt engineer. Your job is to look at THIS specific image and produce an AI image prompt (for Midjourney / DALL-E / Ideogram / Leonardo) that, when run, will recreate THIS image as faithfully as possible. Not a "similar" image. THIS image.
