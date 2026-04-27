@@ -82,23 +82,68 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
 // ── DOWNLOAD MEDIA ──────────────────────────────────────
 const DOWNLOAD_URL = '/.netlify/functions/download';
 
-// Force-download a file from URL using fetch + blob + hidden anchor
+// Sniff a media file's true type from the first bytes. Returns
+// { mime, ext } or null if unrecognized.
+function sniffMediaType(bytes) {
+    if (!bytes || bytes.length < 12) return null;
+    if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+        const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+        if (brand.startsWith('qt')) return { mime: 'video/quicktime', ext: '.mov' };
+        return { mime: 'video/mp4', ext: '.mp4' };
+    }
+    if (bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
+        return { mime: 'video/webm', ext: '.webm' };
+    }
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return { mime: 'image/jpeg', ext: '.jpg' };
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return { mime: 'image/png', ext: '.png' };
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return { mime: 'image/gif', ext: '.gif' };
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+        return { mime: 'image/webp', ext: '.webp' };
+    }
+    return null;
+}
+
+// Force-download a file from URL. Validates the response is actually media
+// (rejects HTML/JSON error pages), uses magic-byte sniffing to set the
+// correct file extension and MIME, and only falls back to opening the URL
+// in a new tab if the in-page fetch genuinely fails.
 async function forceDownload(mediaUrl, filename) {
     try {
         const res = await fetch(mediaUrl);
-        if (!res.ok) throw new Error('fetch failed');
-        const blob = await res.blob();
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
+        const buf = await res.arrayBuffer();
+        if (!buf || buf.byteLength < 1024) {
+            throw new Error('response too small (' + buf.byteLength + ' bytes) — likely an error page');
+        }
+
+        const bytes = new Uint8Array(buf);
+        const sniffed = sniffMediaType(bytes);
+        const headerType = (res.headers.get('Content-Type') || '').toLowerCase();
+
+        if (!sniffed && (headerType.startsWith('text/') || headerType.includes('json'))) {
+            throw new Error('server returned ' + headerType + ' instead of media');
+        }
+
+        const mime = sniffed ? sniffed.mime : (headerType.split(';')[0] || 'application/octet-stream');
+        let finalName = filename || 'flipit-media';
+        if (sniffed) {
+            finalName = finalName.replace(/\.[a-z0-9]{2,4}$/i, '') + sniffed.ext;
+        }
+
+        const blob = new Blob([bytes], { type: mime });
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = filename || 'flipit-media';
+        a.download = finalName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
         return true;
     } catch (e) {
-        // Fallback: hidden anchor with download attribute
+        console.error('forceDownload failed:', e.message);
         const a = document.createElement('a');
         a.href = mediaUrl;
         a.download = filename || 'flipit-media';
@@ -107,7 +152,7 @@ async function forceDownload(mediaUrl, filename) {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        return true;
+        return false;
     }
 }
 
@@ -143,16 +188,24 @@ async function handleDownload() {
                 const byteChars = atob(data.videoData);
                 const byteArr = new Uint8Array(byteChars.length);
                 for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
-                const blob = new Blob([byteArr], { type: 'video/mp4' });
+
+                // Sniff actual format from magic bytes — yt-dlp sometimes returns
+                // .webm even when it claims .mp4, and the wrong MIME breaks playback.
+                const sniffed = sniffMediaType(byteArr);
+                const mime = sniffed ? sniffed.mime : 'video/mp4';
+                const ext = sniffed ? sniffed.ext : (data.ext || '.mp4');
+
+                const blob = new Blob([byteArr], { type: mime });
                 const blobUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = blobUrl;
-                a.download = data.filename || ('flipit-video' + (data.ext || '.mp4'));
+                a.download = (data.filename || 'flipit-video').replace(/\.[a-z0-9]{2,4}$/i, '') + ext;
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
-                showSuccess('✅ Video download started!', 'errorMessage');
+                showSuccess(`✅ Video download started! (${(byteArr.length / 1048576).toFixed(1)} MB ${ext})`, 'errorMessage');
             } catch (e) {
-                showError('❌ Could not save video. Try again.', 'errorMessage');
+                console.error('Video decode failed:', e);
+                showError('❌ Could not save video. The file may be corrupted — try a shorter clip.', 'errorMessage');
             }
 
         } else if (res.ok && data.downloadUrl) {

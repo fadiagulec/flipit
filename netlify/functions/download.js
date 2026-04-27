@@ -30,7 +30,16 @@ exports.handler = async (event) => {
   if (platform === 'tiktok' || platform === 'youtube' || platform === 'instagram') {
     try {
       const result = await tryRailway(url);
-      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
+      if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
+      if (result && result._tooLarge) {
+        return {
+          statusCode: 200, headers,
+          body: JSON.stringify({
+            downloadUrl: null, openUrl: url, platform, source: 'too-large',
+            instruction: `Video is too large (${result.sizeMb || '>4'} MB) to deliver through this connection. Try a shorter clip.`
+          })
+        };
+      }
     } catch (e) { console.log('Railway failed:', e.message); }
   }
 
@@ -118,8 +127,14 @@ async function tryRailway(url) {
     });
     const data = await res.json();
     if (!data.success || !data.videoData) return null;
-    const estimatedBytes = (data.videoData.length * 3) / 4;
-    if (estimatedBytes > 5.5 * 1024 * 1024) return null; // Netlify 6MB cap
+    // Netlify caps response bodies at 6MB. The base64 string itself is what
+    // gets serialized into the JSON body — so it's the base64 length that
+    // must fit, not the decoded binary size. Old code checked binary > 5.5MB,
+    // which lets through base64 of ~7.3MB and causes Netlify to truncate the
+    // response → corrupt downloads. Cap at 5MB of base64 (≈3.75MB binary).
+    if (data.videoData.length > 5 * 1024 * 1024) {
+      return { _tooLarge: true, sizeMb: data.size_mb };
+    }
     return {
       videoData: data.videoData,
       ext: data.ext || '.mp4',
