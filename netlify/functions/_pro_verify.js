@@ -54,12 +54,17 @@ function constantTimeEq(a, b) {
     return diff === 0;
 }
 
-module.exports = { isProRequest, verifyToken };
+// Netlify treats every .js file in functions/ as a function endpoint.
+// Define a benign 404 handler so direct probes return cleanly instead of
+// crashing with "handler is undefined" (which leaks the function shape).
+// IMPORTANT: handler must be on the same module.exports object that
+// holds isProRequest/verifyToken so all three coexist.
+async function handler() {
+    return {
+        statusCode: 404,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Not found' })
+    };
+}
 
-// Netlify treats every .js file in functions/ as a function. Provide a
-// no-op handler so it doesn't show as a broken endpoint.
-exports.handler = async () => ({
-    statusCode: 404,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ error: 'Not found' })
-});
+module.exports = { isProRequest, verifyToken, handler };
