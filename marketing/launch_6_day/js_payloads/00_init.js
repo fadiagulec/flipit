@@ -1,0 +1,1 @@
+(()=>{window.__cv=[];const inp=Array.from(document.querySelectorAll('input[type=file]')).find(i=>!i.hasAttribute('webkitdirectory'));window.__cvInp=inp;return 'init '+(inp?'OK':'NO_INPUT');})()
