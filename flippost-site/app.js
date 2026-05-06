@@ -1137,3 +1137,155 @@ function showSuccess(msg, id) {
         }
     });
 })();
+
+// ── TAB: TRENDING VIRAL FEED (Apify-backed) ───────────────────
+// Show top-engagement TikToks for the selected niche/hashtag.
+// One-click on a card pastes the URL into Tab 1 (URL Extract) and runs the flip.
+(function wireTrendingTab() {
+    const btn = document.getElementById('findTrendingBtn');
+    if (!btn) return;
+    const nicheSelect = document.getElementById('trendingNiche');
+    const hashtagInput = document.getElementById('trendingHashtag');
+    const container = document.getElementById('trendingResultsContainer');
+
+    function fmtNum(n) {
+        if (!Number.isFinite(n)) return '0';
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(n);
+    }
+
+    function renderCards(results) {
+        container.innerHTML = '';
+        if (!results || results.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'result-section';
+            empty.innerHTML = '<h3>\u{1F50D} No trending posts found</h3><p class="result-text">Try a different niche or hashtag.</p>';
+            container.appendChild(empty);
+            return;
+        }
+
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:10px;';
+        results.forEach((r, i) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border-radius:14px;padding:14px;border:1px solid #e8e4de;display:flex;flex-direction:column;gap:8px;';
+
+            // Thumbnail (proxied to bypass CDN hot-link blocks)
+            if (r.thumbnail) {
+                const thumb = document.createElement('img');
+                thumb.src = '/.netlify/functions/proxy-download?url=' + encodeURIComponent(r.thumbnail);
+                thumb.alt = 'Top post by ' + r.author;
+                thumb.loading = 'lazy';
+                thumb.style.cssText = 'width:100%;height:200px;object-fit:cover;border-radius:10px;background:#f0eee9;';
+                thumb.addEventListener('error', () => { thumb.style.display = 'none'; });
+                card.appendChild(thumb);
+            }
+
+            // Author + rank
+            const head = document.createElement('div');
+            head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#0d6e66;font-weight:700;';
+            const author = document.createElement('span');
+            author.textContent = r.author || '@unknown';
+            const rank = document.createElement('span');
+            rank.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;padding:2px 10px;border-radius:999px;font-size:11px;';
+            rank.textContent = '#' + (i + 1) + ' viral';
+            head.appendChild(author);
+            head.appendChild(rank);
+            card.appendChild(head);
+
+            // Caption snippet
+            const cap = document.createElement('p');
+            cap.style.cssText = 'color:#444;font-size:14px;line-height:1.4;margin:0;max-height:4.2em;overflow:hidden;';
+            cap.textContent = r.caption || '(no caption)';
+            card.appendChild(cap);
+
+            // Engagement stats
+            const stats = document.createElement('div');
+            stats.style.cssText = 'display:flex;gap:14px;font-size:12px;color:#888;flex-wrap:wrap;';
+            stats.innerHTML =
+                '<span>❤️ ' + fmtNum(r.likes) + '</span>' +
+                '<span>\u{1F441}️ ' + fmtNum(r.views) + '</span>' +
+                '<span>\u{1F4AC} ' + fmtNum(r.comments) + '</span>' +
+                '<span>\u{1F501} ' + fmtNum(r.shares) + '</span>';
+            card.appendChild(stats);
+
+            // Actions
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;gap:8px;margin-top:auto;';
+            const flipBtn = document.createElement('button');
+            flipBtn.textContent = '⚡ Flip This';
+            flipBtn.style.cssText = 'flex:1;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;padding:10px 14px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+            flipBtn.addEventListener('click', () => flipFromTrendingCard(r.url));
+            const openBtn = document.createElement('a');
+            openBtn.textContent = '↗ Open';
+            openBtn.href = r.url;
+            openBtn.target = '_blank';
+            openBtn.rel = 'noopener';
+            openBtn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:10px 14px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;text-align:center;';
+            actions.appendChild(flipBtn);
+            actions.appendChild(openBtn);
+            card.appendChild(actions);
+
+            grid.appendChild(card);
+        });
+        container.appendChild(grid);
+    }
+
+    function flipFromTrendingCard(url) {
+        if (typeof switchTab === 'function') switchTab('url-tab');
+        const urlInput = document.getElementById('urlInput');
+        if (urlInput) {
+            urlInput.value = url;
+            urlInput.dispatchEvent(new Event('input'));
+        }
+        const extractBtn = document.getElementById('extractBtn');
+        if (extractBtn) {
+            extractBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => extractBtn.click(), 250);
+        }
+    }
+
+    btn.addEventListener('click', async () => {
+        const niche = (nicheSelect && nicheSelect.value) || '';
+        const hashtag = (hashtagInput && hashtagInput.value.trim()) || '';
+        if (!niche && !hashtag) {
+            showError('Pick a niche or type a hashtag first.', 'trendingErrorMessage');
+            return;
+        }
+        if (!gateOrPaywall()) return;
+
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Fetching trending posts…';
+        container.innerHTML = '<div class="loading">\u{1F525} Pulling the day’s top viral posts…</div>';
+
+        try {
+            const res = await fetch('/.netlify/functions/trending', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ niche, hashtag, count: 10 })
+            });
+            const data = await res.json();
+
+            if (res.status === 429) {
+                container.innerHTML = '';
+                showError('⚠️ ' + (data.error || 'Daily flip limit reached.'), 'trendingErrorMessage');
+                return;
+            }
+            if (!res.ok || !Array.isArray(data.results)) {
+                throw new Error(data.error || 'Trending fetch failed');
+            }
+
+            renderCards(data.results);
+            recordFlipSuccess();
+        } catch (err) {
+            container.innerHTML = '';
+            console.error('Trending error:', err);
+            showError('❌ ' + (err.message || 'Could not fetch trending posts. Please try again.'), 'trendingErrorMessage');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = original;
+        }
+    });
+})();
