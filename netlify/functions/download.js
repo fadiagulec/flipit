@@ -6,6 +6,7 @@ const COBALT_URL  = 'https://cobalt-api-production-4129.up.railway.app/';
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
 
 const { isProRequest } = require('./_pro_verify');
+const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = async (event) => {
     const isPro = isProRequest(event);
@@ -16,6 +17,10 @@ exports.handler = async (event) => {
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+
+  // ── Rate limit gate ──
+  const quota = await enforceAiQuota(event, isPro);
+  if (!quota.allowed) return rateLimitResponse(headers, quota);
 
   let url;
   try {
