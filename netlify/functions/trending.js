@@ -68,12 +68,15 @@ exports.handler = async function (event) {
     if (!Number.isFinite(count)) count = 10;
     count = Math.max(3, Math.min(20, count));
 
-    // Resolve hashtags to scrape
+    // Resolve hashtags to scrape. Apify's TikTok scraper fans out one search
+    // per hashtag and runs them sequentially — 3 hashtags blew past the 25s
+    // sync budget. Pick a single best hashtag per niche; users can type a
+    // custom one for variety.
     let hashtags;
     if (customHashtag) {
         hashtags = [customHashtag];
     } else if (niche && NICHE_TO_HASHTAGS[niche]) {
-        hashtags = NICHE_TO_HASHTAGS[niche];
+        hashtags = [NICHE_TO_HASHTAGS[niche][0]];
     } else {
         return {
             statusCode: 400,
