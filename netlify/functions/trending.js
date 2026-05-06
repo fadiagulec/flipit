@@ -119,11 +119,20 @@ exports.handler = async function (event) {
 
         if (!resp.ok) {
             const text = await resp.text().catch(() => '');
-            console.error('Apify non-OK:', resp.status, text.slice(0, 200));
+            console.error('Apify non-OK:', resp.status, text.slice(0, 500));
+            // Surface the upstream status so we can diagnose auth/quota/actor issues
+            // without scraping Netlify logs. We never expose the response body
+            // (which could contain partial PII or rate-limit metadata).
+            const reason =
+                resp.status === 401 ? 'Apify auth failed — APIFY_TOKEN may be wrong or revoked.' :
+                resp.status === 402 ? 'Apify out of credit — top up your Apify account.' :
+                resp.status === 404 ? 'Apify actor not found — actor name in the function may be wrong.' :
+                resp.status === 429 ? 'Apify rate-limited the call — try again in a minute.' :
+                'Apify upstream error: HTTP ' + resp.status;
             return {
                 statusCode: 502,
                 headers,
-                body: JSON.stringify({ error: 'Could not reach the trending feed. Please try again.' })
+                body: JSON.stringify({ error: reason, upstreamStatus: resp.status })
             };
         }
         raw = await resp.json();
