@@ -21,6 +21,7 @@
 // Server-side gates re-verify the HMAC before granting Pro.
 
 const crypto = require('crypto');
+const { enforceTokenIssueQuota, rateLimitResponse } = require('./_rate_limit');
 
 const TOKEN_PREFIX = 'flpt.';
 const TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
@@ -37,6 +38,10 @@ exports.handler = async function (event) {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
+
+    // ── Rate limit gate (5 attempts/min per IP — Stripe API spam mitigation) ──
+    const tokenQuota = await enforceTokenIssueQuota(event);
+    if (!tokenQuota.allowed) return rateLimitResponse(headers, tokenQuota);
 
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     const tokenSecret = process.env.FLIPIT_TOKEN_SECRET;

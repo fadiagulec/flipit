@@ -5,6 +5,7 @@
 // client-side template so prompts actually depict the user's script.
 
 const { isProRequest } = require('./_pro_verify');
+const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = async function (event) {
     const isPro = isProRequest(event);
@@ -21,6 +22,10 @@ exports.handler = async function (event) {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
+
+    // ── Rate limit gate ──
+    const quota = await enforceAiQuota(event, isPro);
+    if (!quota.allowed) return rateLimitResponse(headers, quota);
 
     // ── Parse body ───────────────────────────────────────────
     let body;

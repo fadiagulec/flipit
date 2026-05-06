@@ -5,6 +5,7 @@
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 const { isProRequest } = require('./_pro_verify');
+const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = async (event) => {
     const isPro = isProRequest(event);
@@ -21,6 +22,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
+
+  // ── Rate limit gate ──
+  const quota = await enforceAiQuota(event, isPro);
+  if (!quota.allowed) return rateLimitResponse(headers, quota);
 
   if (!ANTHROPIC_API_KEY) {
     console.error('Image analysis error: ANTHROPIC_API_KEY not configured');
