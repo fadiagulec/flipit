@@ -495,3 +495,55 @@ footer a:hover { color: #0a9b8e; }
     .result-text { font-size: 18px; padding: 12px; }
     .niche-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── ACCESSIBILITY: visible focus rings for keyboard nav ── */
+button:focus-visible,
+.niche-card:focus-visible,
+.event-pill:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: 3px solid #0a9b8e;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(10, 155, 142, 0.2);
+}
+
+/* Niche card "selected" non-color cue: visible checkmark in corner */
+.niche-card { position: relative; }
+.niche-card.selected::after {
+    content: '\2713';
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    background: #0d6e66;
+    color: #fff;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+/* Event pill "selected" non-color cue */
+.event-pill.selected {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+}
+
+/* Reset native button styling on cards/pills since they're styled like cards */
+button.niche-card,
+button.event-pill {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    cursor: pointer;
+    background: inherit;
+    color: inherit;
+    border: inherit;
+}
