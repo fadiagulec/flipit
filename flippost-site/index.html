@@ -27,6 +27,7 @@
         <!-- Tabs Navigation -->
         <div class="tabs">
             <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
+            <button class="tab-btn" data-tab="trending-tab">🔥 Trending</button>
             <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
             <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
             <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
@@ -47,6 +48,35 @@
                 </div>
             </div>
             <div id="resultsContainer"></div>
+        </div>
+
+        <!-- Tab 1.5: Trending Viral Feed -->
+        <div id="trending-tab" class="tab-content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="trendingNiche">Pick a niche or hashtag</label>
+                    <select id="trendingNiche">
+                        <option value="">— pick a niche —</option>
+                        <option value="mommy">👩‍👧‍👦 Mommy</option>
+                        <option value="home">🏡 Home</option>
+                        <option value="food">🍽️ Food</option>
+                        <option value="fashion">👗 Fashion</option>
+                        <option value="lifestyle">✨ Lifestyle</option>
+                        <option value="beauty">💄 Beauty</option>
+                        <option value="travel">✈️ Travel</option>
+                        <option value="fitness">💪 Fitness</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="trendingHashtag">…or type a custom hashtag</label>
+                    <input type="text" id="trendingHashtag" placeholder="e.g. cleantok, dadlife, smallbiz" maxlength="50" />
+                </div>
+                <div id="trendingErrorMessage"></div>
+                <div class="button-group">
+                    <button id="findTrendingBtn" class="btn-primary">🔥 Find Top Viral Posts</button>
+                </div>
+            </div>
+            <div id="trendingResultsContainer"></div>
         </div>
 
         <!-- Tab 2: Script Rewrite -->
