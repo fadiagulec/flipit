@@ -1352,20 +1352,31 @@ function showSuccess(msg, id) {
 
 // ── TAB 4: IMAGE PROMPTS WIRING ──────────────────────────
 (function wireImagePromptsTab() {
-    // Niche cards — single-select
+    // Niche cards — single-select. aria-pressed mirrors the .selected class
+    // so screen readers announce the toggle state.
     document.querySelectorAll('#nicheGrid .niche-card').forEach(card => {
         card.addEventListener('click', () => {
-            document.querySelectorAll('#nicheGrid .niche-card').forEach(c => c.classList.remove('selected'));
+            document.querySelectorAll('#nicheGrid .niche-card').forEach(c => {
+                c.classList.remove('selected');
+                c.setAttribute('aria-pressed', 'false');
+            });
             card.classList.add('selected');
+            card.setAttribute('aria-pressed', 'true');
         });
     });
 
-    // Event pills — single-select toggle (only one can be selected at a time)
+    // Event pills — single-select toggle (clicking a selected pill deselects).
     document.querySelectorAll('#eventPills .event-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             const wasSelected = pill.classList.contains('selected');
-            document.querySelectorAll('#eventPills .event-pill').forEach(p => p.classList.remove('selected'));
-            if (!wasSelected) pill.classList.add('selected');
+            document.querySelectorAll('#eventPills .event-pill').forEach(p => {
+                p.classList.remove('selected');
+                p.setAttribute('aria-pressed', 'false');
+            });
+            if (!wasSelected) {
+                pill.classList.add('selected');
+                pill.setAttribute('aria-pressed', 'true');
+            }
         });
     });
 
