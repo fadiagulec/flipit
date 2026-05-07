@@ -1,0 +1,36 @@
+name: Netlify deploy
+# Backup deploy trigger — Netlify's GitHub integration stopped firing in May 2026.
+# This workflow pings Netlify's build hook on every push to main so deploys
+# always go out, even if the dashboard webhook breaks again.
+#
+# To activate: in GitHub repo Settings → Secrets and variables → Actions,
+#   add a secret named NETLIFY_BUILD_HOOK with the value of a Netlify build hook
+#   URL (Netlify dashboard → Site configuration → Build & deploy →
+#   Continuous deployment → Build hooks → Add build hook → copy URL).
+#
+# If the secret is missing this workflow no-ops (so it doesn't fail the run).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # manual trigger from the Actions tab
+
+jobs:
+  trigger-netlify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Netlify build hook
+        env:
+          NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+        run: |
+          if [ -z "$NETLIFY_BUILD_HOOK" ]; then
+            echo "::warning::NETLIFY_BUILD_HOOK secret not set — skipping (add a build hook URL in repo Settings → Secrets → Actions to enable)."
+            exit 0
+          fi
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$NETLIFY_BUILD_HOOK")
+          if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+            echo "✅ Netlify build triggered (HTTP $status) for $GITHUB_SHA"
+          else
+            echo "::error::Netlify build hook returned HTTP $status"
+            exit 1
+          fi
