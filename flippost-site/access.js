@@ -251,9 +251,11 @@
     window.__flipitFetchPatched = true;
   }
 
+  // Debug-only — opt-in via ?debug=1. Was leaking tier/quota state on
+  // every page load to anyone who opened DevTools.
   try {
-    console.info('[FlipIt] access state:', window.FlipItAccess.getState());
-  } catch (e) {
-    /* console may be unavailable in some embedded contexts */
-  }
+    if (typeof window !== 'undefined' && window.location && /[?&]debug=1\b/.test(window.location.search)) {
+      console.info('[FlipIt] access state:', window.FlipItAccess.getState());
+    }
+  } catch (e) { /* ignore */ }
 })();
