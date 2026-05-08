@@ -1210,19 +1210,30 @@ function showSuccess(msg, id) {
                 '<span>\u{1F501} ' + fmtNum(r.shares) + '</span>';
             card.appendChild(stats);
 
+            // "Example" badge for curated/fallback items so users know
+            // this isn't live trending and the URL is illustrative only.
+            if (r.curated) {
+                const badge = document.createElement('div');
+                badge.style.cssText = 'display:inline-block;background:#fff8e1;color:#5a4a00;border:1px solid #e8c840;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;align-self:flex-start;';
+                badge.textContent = '💡 Example (curated)';
+                card.appendChild(badge);
+            }
+
             // Actions
             const actions = document.createElement('div');
             actions.style.cssText = 'display:flex;gap:8px;margin-top:auto;';
             const flipBtn = document.createElement('button');
             flipBtn.textContent = '⚡ Flip This';
             flipBtn.style.cssText = 'flex:1;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;padding:10px 14px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
-            flipBtn.addEventListener('click', () => flipFromTrendingCard(r.url));
+            flipBtn.addEventListener('click', () => flipFromTrendingCard(r));
             const openBtn = document.createElement('a');
             openBtn.textContent = '↗ Open';
             openBtn.href = r.url;
             openBtn.target = '_blank';
             openBtn.rel = 'noopener';
-            openBtn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:10px 14px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;text-align:center;';
+            // Hide the Open button on curated items — their URLs don't resolve.
+            if (r.curated) openBtn.style.display = 'none';
+            openBtn.style.cssText = (r.curated ? 'display:none;' : '') + 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:10px 14px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;text-align:center;';
             actions.appendChild(flipBtn);
             actions.appendChild(openBtn);
             card.appendChild(actions);
@@ -1232,11 +1243,29 @@ function showSuccess(msg, id) {
         container.appendChild(grid);
     }
 
-    function flipFromTrendingCard(url) {
+    function flipFromTrendingCard(item) {
+        // Curated fallback items have placeholder URLs that don't resolve —
+        // sending them through URL Extract produces empty/garbage output.
+        // Route those to Script Rewrite using the caption directly.
+        if (item && item.curated) {
+            if (typeof switchTab === 'function') switchTab('script-tab');
+            const scriptInput = document.getElementById('scriptInput');
+            if (scriptInput) {
+                scriptInput.value = item.caption || '';
+                scriptInput.dispatchEvent(new Event('input'));
+            }
+            const rewriteBtn = document.getElementById('rewriteBtn');
+            if (rewriteBtn) {
+                rewriteBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => rewriteBtn.click(), 250);
+            }
+            return;
+        }
+        // Live trending result: paste URL, run extract+flip.
         if (typeof switchTab === 'function') switchTab('url-tab');
         const urlInput = document.getElementById('urlInput');
         if (urlInput) {
-            urlInput.value = url;
+            urlInput.value = (item && item.url) || '';
             urlInput.dispatchEvent(new Event('input'));
         }
         const extractBtn = document.getElementById('extractBtn');
