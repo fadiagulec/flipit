@@ -119,6 +119,8 @@ exports.handler = async function(event) {
         const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
         const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
         const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+        const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+        const ogImageSecure = html.match(/<meta[^>]*property=["']og:image:secure_url["'][^>]*content=["']([^"']+)["']/i);
 
         const parts = [];
         if (ogDesc && ogDesc[1].length > 10) parts.push(ogDesc[1]);
@@ -128,6 +130,12 @@ exports.handler = async function(event) {
         const combined = parts.join('\n\n').trim();
         if (combined.length > 30) {
           originalText = decodeEntities(combined);
+        }
+        // Capture og:image so the Image Prompt button can run AI Vision
+        // on the actual post visuals — works even when Apify is skipped.
+        const imgUrl = (ogImageSecure && ogImageSecure[1]) || (ogImage && ogImage[1]);
+        if (imgUrl && imgUrl.startsWith('http')) {
+          sourceImages.push(decodeEntities(imgUrl));
         }
       }
     } catch (err) {
@@ -251,11 +259,20 @@ exports.handler = async function(event) {
       const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
       const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
       const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+      const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+      const ogImageSecure = html.match(/<meta[^>]*property=["']og:image:secure_url["'][^>]*content=["']([^"']+)["']/i);
 
       if (ogTitle && ogTitle[1].length > 5) metaParts.push(ogTitle[1]);
       if (ogDesc && ogDesc[1].length > 10) metaParts.push(ogDesc[1]);
       if (metaDesc && metaDesc[1].length > 10 && (!ogDesc || metaDesc[1] !== ogDesc[1])) metaParts.push(metaDesc[1]);
       if (pageTitle && pageTitle[1].length > 5 && (!ogTitle || pageTitle[1] !== ogTitle[1])) metaParts.push(pageTitle[1]);
+
+      // Capture og:image so the Image Prompt button can run AI Vision
+      // on the actual post visuals — same fix as the IG-specific path.
+      const genericImg = (ogImageSecure && ogImageSecure[1]) || (ogImage && ogImage[1]);
+      if (genericImg && genericImg.startsWith('http') && !sourceImages.includes(genericImg)) {
+        sourceImages.push(decodeEntities(genericImg));
+      }
 
       if (metaParts.join(' ').length > 50) {
         originalText = decodeEntities(metaParts.join('\n\n'));
