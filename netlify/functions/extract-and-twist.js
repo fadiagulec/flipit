@@ -129,14 +129,18 @@ exports.handler = async function(event) {
       console.error('Instagram fetch error:', err.message);
     }
 
-    // FB-crawler UA + meta tags failed. Try Apify's instagram-post-scraper
-    // (apify/instagram-post-scraper, 31M+ runs) before bailing. This is the
-    // ONE reliable way to get IG captions server-side.
+    // FB-crawler UA + meta tags failed (the typical case for modern IG).
+    // Use Apify's instagram-scraper (apify/instagram-scraper, 125M+ runs)
+    // with directUrls + resultsType:posts. This actor reliably returns the
+    // caption + ownerUsername within ~15-20s for public posts.
+    //
+    // Earlier code used apify/instagram-post-scraper which requires a
+    // `username` field (not `directUrls`), so it 400'd every call.
     if (!originalText || originalText.length < 30) {
       const apifyToken = process.env.APIFY_TOKEN;
       if (apifyToken) {
         try {
-          const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-post-scraper/run-sync-get-dataset-items?token=' + encodeURIComponent(apifyToken) + '&timeout=22';
+          const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?token=' + encodeURIComponent(apifyToken) + '&timeout=23';
           const apifyResp = await fetch(apifyUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -144,9 +148,10 @@ exports.handler = async function(event) {
               directUrls: [url],
               resultsType: 'posts',
               resultsLimit: 1,
-              addParentData: false
+              addParentData: false,
+              enhanceUserSearchWithFacebookPage: false
             }),
-            signal: AbortSignal.timeout(22000)
+            signal: AbortSignal.timeout(24000)
           });
           if (apifyResp.ok) {
             const items = await apifyResp.json();
