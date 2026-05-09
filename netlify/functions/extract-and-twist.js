@@ -129,13 +129,46 @@ exports.handler = async function(event) {
       console.error('Instagram fetch error:', err.message);
     }
 
-    // If extraction failed, return early with a clean error so the
-    // frontend can show the "paste caption manually" hint. The old
-    // code fabricated a meta-prompt ("[Instagram from URL: ...] - I
-    // can't extract..."), Claude then wrote a script ABOUT inability
-    // to read Instagram, and downstream image/video prompts depicted
-    // chains, locks, and "access denied" cards instead of the actual
-    // post's content. Bail cleanly instead.
+    // FB-crawler UA + meta tags failed. Try Apify's instagram-post-scraper
+    // (apify/instagram-post-scraper, 31M+ runs) before bailing. This is the
+    // ONE reliable way to get IG captions server-side.
+    if (!originalText || originalText.length < 30) {
+      const apifyToken = process.env.APIFY_TOKEN;
+      if (apifyToken) {
+        try {
+          const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-post-scraper/run-sync-get-dataset-items?token=' + encodeURIComponent(apifyToken) + '&timeout=22';
+          const apifyResp = await fetch(apifyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              directUrls: [url],
+              resultsType: 'posts',
+              resultsLimit: 1,
+              addParentData: false
+            }),
+            signal: AbortSignal.timeout(22000)
+          });
+          if (apifyResp.ok) {
+            const items = await apifyResp.json();
+            if (Array.isArray(items) && items.length > 0) {
+              const item = items[0];
+              const caption = (item.caption || item.text || '').trim();
+              const author = (item.ownerUsername || item.owner || '').replace(/^@/, '');
+              if (caption && caption.length > 10) {
+                originalText = author ? `By @${author}: ${caption}` : caption;
+              }
+            }
+          } else {
+            console.warn('Apify IG scraper non-OK:', apifyResp.status);
+          }
+        } catch (apifyErr) {
+          console.warn('Apify IG scraper failed:', apifyErr && apifyErr.message);
+        }
+      }
+    }
+
+    // If even Apify couldn't extract (rare — private/deleted post, or no
+    // APIFY_TOKEN), bail cleanly so the UI can show the manual-paste hint.
     if (!originalText || originalText.length < 30) {
       return {
         statusCode: 200,
@@ -143,7 +176,7 @@ exports.handler = async function(event) {
         body: JSON.stringify({
           success: false,
           embed: true,
-          message: "Instagram blocks server-side caption reading. Copy the post's caption text and paste it into the Script Rewrite tab to flip it. Or click Download Media first — if the post has carousel images, the Image Prompt button will then run AI Vision on the actual images."
+          message: "Couldn't read this Instagram post (it may be private, deleted, or behind a login). Copy the caption text and paste it into the Script Rewrite tab — or click Download Media first to use Image Prompt with AI Vision on the actual images."
         })
       };
     }
