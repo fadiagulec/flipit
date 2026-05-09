@@ -68,6 +68,11 @@ exports.handler = async function(event) {
 
   // Step 1: Fetch the URL and extract text
   let originalText = '';
+  // Source-image URLs scraped alongside the caption (when available, e.g.
+  // from the Apify Instagram path). Surfaced to the frontend so the
+  // Image Prompt button can run AI Vision on the real post visuals
+  // without requiring the user to click Download Media first.
+  let sourceImages = [];
 
   // Detect platform
   const isInstagram = url.includes('instagram.com') || url.includes('instagr.am');
@@ -132,10 +137,7 @@ exports.handler = async function(event) {
     // FB-crawler UA + meta tags failed (the typical case for modern IG).
     // Use Apify's instagram-scraper (apify/instagram-scraper, 125M+ runs)
     // with directUrls + resultsType:posts. This actor reliably returns the
-    // caption + ownerUsername within ~15-20s for public posts.
-    //
-    // Earlier code used apify/instagram-post-scraper which requires a
-    // `username` field (not `directUrls`), so it 400'd every call.
+    // caption + ownerUsername + image URLs within ~15-20s for public posts.
     if (!originalText || originalText.length < 30) {
       const apifyToken = process.env.APIFY_TOKEN;
       if (apifyToken) {
@@ -161,6 +163,29 @@ exports.handler = async function(event) {
               const author = (item.ownerUsername || item.owner || '').replace(/^@/, '');
               if (caption && caption.length > 10) {
                 originalText = author ? `By @${author}: ${caption}` : caption;
+              }
+              // Capture source image URLs so the frontend can run AI Vision
+              // (analyze-image) on the actual post visuals — no manual
+              // "Download Media first" step needed before clicking
+              // Image Prompt.
+              const collected = [];
+              if (typeof item.displayUrl === 'string' && item.displayUrl.startsWith('http')) {
+                collected.push(item.displayUrl);
+              }
+              if (Array.isArray(item.images)) {
+                for (const img of item.images) {
+                  if (typeof img === 'string' && img.startsWith('http')) collected.push(img);
+                }
+              }
+              if (Array.isArray(item.childPosts)) {
+                for (const child of item.childPosts) {
+                  if (child && typeof child.displayUrl === 'string' && child.displayUrl.startsWith('http')) {
+                    collected.push(child.displayUrl);
+                  }
+                }
+              }
+              if (collected.length > 0) {
+                sourceImages = Array.from(new Set(collected)).slice(0, 10);
               }
             }
           } else {
@@ -334,6 +359,7 @@ exports.handler = async function(event) {
         original: originalText,
         twisted: twisted,
         prompt: prompt,
+        sourceImages: sourceImages,
         embed: true
       })
     };
