@@ -55,10 +55,14 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error('Image analysis error:', err);
-    // Surface user-actionable errors (size, fetch) so the UI can guide them.
+    // Surface user-actionable errors (size, fetch, claude) so the UI can guide them.
     const msg = err && err.message ? err.message : '';
     let userMsg = 'Image analysis failed. Please try again.';
     if (/too large/i.test(msg)) userMsg = msg;
+    else if (/request too large|over.{0,5}limit/i.test(msg)) userMsg = 'Image too large for Claude — try a smaller post.';
+    else if (/rate.?limit/i.test(msg)) userMsg = 'Hit the AI rate limit — wait 60 seconds and try again.';
+    else if (/can't generate a recreate prompt/i.test(msg)) userMsg = msg;
+    else if (/Claude API/i.test(msg)) userMsg = 'AI service error: ' + msg.slice(0, 120);
     else if (/Image fetch HTTP/i.test(msg)) userMsg = 'Could not fetch this image (the source may be private or expired).';
     else if (/empty body/i.test(msg)) userMsg = 'The image source returned empty data.';
     return {
@@ -97,9 +101,11 @@ async function fetchImageAsBase64(imageUrl) {
            bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mediaType = 'image/webp';
   else if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) mediaType = 'image/jpeg';
 
-  // Anthropic supports up to ~5 MB per image. Reject anything larger.
-  if (buf.byteLength > 5 * 1024 * 1024) {
-    throw new Error('Image too large for analysis (' + Math.round(buf.byteLength / 1024) + ' KB)');
+  // Anthropic API has a strict per-message payload cap. Empirically images
+  // bigger than ~3.5 MB binary (~4.7 MB base64) start triggering generic
+  // "request too large" 400s. Cap aggressively at 3 MB binary.
+  if (buf.byteLength > 3 * 1024 * 1024) {
+    throw new Error('Image too large for analysis (' + Math.round(buf.byteLength / 1024) + ' KB > 3072 KB cap). Try a smaller post.');
   }
 
   return {
@@ -154,6 +160,12 @@ ABSOLUTE RULES:
 - BANNED phrases: "stylish person", "casual clothing", "modern setting", "lifestyle photo", "beautiful lighting", "vibrant colors", "aesthetic vibe", "cozy atmosphere", or anything else that could describe 10,000 different images. If you catch yourself writing one of these, replace it with the specific visible detail.
 - Be concrete. "A woman with shoulder-length chestnut-brown hair, parted on the left, wearing a cream chunky cable-knit sweater" — NOT "a stylish woman in casual wear".
 - If a detail is unclear, describe what you DO see (e.g. "a logo on the mug, partially obscured, appearing to read 'STAR...'") rather than guessing or omitting.
+
+SAFETY (the recreate prompt is going to social media — keep it appropriate):
+- If the source image contains scars, wounds, blood, self-harm marks, medication, IV drips, or other clinical/distressing content, DO NOT include those details. Describe the rest of the scene and SKIP the harmful element entirely (don't mention scars/wrists/blood). The recreated image must be social-media-safe even if the source isn't.
+- If the source image shows a person in visible emotional distress (crying, hunched, contracted, self-isolating posture), describe them in a NEUTRAL/CALM frame — "seated upright, expression composed, hands resting in lap" — not the distress.
+- If the source has explicit nudity or sexually suggestive imagery, refuse with: "Image contains content I can't generate a recreate prompt for. Try a different post." (output literally that string and nothing else, no --ar tags).
+- Otherwise: full forensic detail.
 
 YOU MUST DESCRIBE, IN ORDER, AS ONE FLOWING PARAGRAPH:
 
