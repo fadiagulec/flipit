@@ -129,11 +129,23 @@ exports.handler = async function(event) {
       console.error('Instagram fetch error:', err.message);
     }
 
-    // If extraction failed, use URL-based generation with Claude
+    // If extraction failed, return early with a clean error so the
+    // frontend can show the "paste caption manually" hint. The old
+    // code fabricated a meta-prompt ("[Instagram from URL: ...] - I
+    // can't extract..."), Claude then wrote a script ABOUT inability
+    // to read Instagram, and downstream image/video prompts depicted
+    // chains, locks, and "access denied" cards instead of the actual
+    // post's content. Bail cleanly instead.
     if (!originalText || originalText.length < 30) {
-      const igIdMatch = url.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)/);
-      const contentType = igIdMatch ? igIdMatch[1] : 'post';
-      originalText = `[Instagram ${contentType} from URL: ${url}] - Instagram blocks server-side text extraction. Please generate a viral script template for this type of Instagram ${contentType} content.`;
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          embed: true,
+          message: "Instagram blocks server-side caption reading. Copy the post's caption text and paste it into the Script Rewrite tab to flip it. Or click Download Media first — if the post has carousel images, the Image Prompt button will then run AI Vision on the actual images."
+        })
+      };
     }
   }
 
@@ -232,13 +244,12 @@ exports.handler = async function(event) {
     }
   }
 
-  // Step 2: Use Claude to flip the script
-  const isInstagramFallback = isInstagram && originalText.includes('[Instagram') && originalText.includes('blocks server-side');
-
-  // Different prompts for extracted text vs Instagram fallback
-  const userPrompt = isInstagramFallback
-    ? `I have an Instagram ${url.includes('/reel/') ? 'reel' : 'post'} at this URL: ${url}\n\nI couldn't extract the caption text because Instagram blocks automated access. Please create a viral script template that would work great for this type of Instagram content. Write it as if you're rewriting an existing post with a fresh viral angle.\n\nProvide:\n1. A complete viral script/caption (ready to use)\n2. A scroll-stopping hook line to start with\n3. Relevant trending hashtags`
-    : `Here is a social media post/script extracted from a URL. Rewrite it with a viral angle:\n\n---\n${originalText}\n---\n\nProvide:\n1. A rewritten viral version\n2. A proven hook line to start with`;
+  // Step 2: Use Claude to flip the script. The Instagram-extraction-failed
+  // fallback now bails out cleanly above with success:false, so we no longer
+  // pollute Claude with "[I can't extract Instagram] please generate a
+  // template" — that meta-prompt was producing scripts ABOUT extraction
+  // failures, which downstream image/video prompts then literally illustrated.
+  const userPrompt = `Here is a social media post/script extracted from a URL. Rewrite it with a viral angle:\n\n---\n${originalText}\n---\n\nProvide:\n1. A rewritten viral version\n2. A proven hook line to start with`;
 
   try {
     const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -282,7 +293,7 @@ exports.handler = async function(event) {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        original: isInstagramFallback ? '(Instagram caption could not be extracted - generated fresh viral content instead)' : originalText,
+        original: originalText,
         twisted: twisted,
         prompt: prompt,
         embed: true
