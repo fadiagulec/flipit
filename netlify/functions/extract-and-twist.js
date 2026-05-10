@@ -147,10 +147,7 @@ exports.handler = async function(event) {
     // FB-crawler UA + meta tags failed (the typical case for modern IG).
     // Use Apify's instagram-scraper (apify/instagram-scraper, 125M+ runs)
     // with directUrls + resultsType:posts. This actor reliably returns the
-    // caption + ownerUsername within ~15-20s for public posts.
-    //
-    // Earlier code used apify/instagram-post-scraper which requires a
-    // `username` field (not `directUrls`), so it 400'd every call.
+    // caption + ownerUsername + image URLs within ~15-20s for public posts.
     if (!originalText || originalText.length < 30) {
       const apifyToken = process.env.APIFY_TOKEN;
       if (apifyToken) {
@@ -177,19 +174,28 @@ exports.handler = async function(event) {
               if (caption && caption.length > 10) {
                 originalText = author ? `By @${author}: ${caption}` : caption;
               }
-              // Capture all source images so the Image Prompt button can
-              // run AI Vision on the actual post visuals.
-              const pushImg = (u) => {
-                if (typeof u === 'string' && /^https?:\/\//.test(u) && !sourceImages.includes(u)) {
-                  sourceImages.push(u);
+              // Capture source image URLs so the frontend can run AI Vision
+              // (analyze-image) on the actual post visuals — no manual
+              // "Download Media first" step needed before clicking
+              // Image Prompt. Dedup + cap at 10 to bound payload size.
+              const collected = sourceImages.slice(); // start with og:image if any
+              if (typeof item.displayUrl === 'string' && item.displayUrl.startsWith('http')) {
+                collected.push(item.displayUrl);
+              }
+              if (Array.isArray(item.images)) {
+                for (const img of item.images) {
+                  if (typeof img === 'string' && img.startsWith('http')) collected.push(img);
                 }
-              };
-              pushImg(item.displayUrl);
-              if (Array.isArray(item.images)) item.images.forEach(pushImg);
+              }
               if (Array.isArray(item.childPosts)) {
-                item.childPosts.forEach((c) => {
-                  if (c && typeof c === 'object') pushImg(c.displayUrl);
-                });
+                for (const child of item.childPosts) {
+                  if (child && typeof child.displayUrl === 'string' && child.displayUrl.startsWith('http')) {
+                    collected.push(child.displayUrl);
+                  }
+                }
+              }
+              if (collected.length > 0) {
+                sourceImages = Array.from(new Set(collected)).slice(0, 10);
               }
             }
           } else {

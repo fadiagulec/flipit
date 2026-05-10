@@ -601,6 +601,15 @@ function displayResults(data, platform) {
         container.appendChild(wrap);
     }
 
+    // Source images scraped server-side (e.g. Apify Instagram path).
+    // Stash them in the same global the carousel-download flow uses so
+    // the Image Prompt button auto-runs AI Vision on the actual post
+    // visuals \u2014 no need for the user to click Download Media first.
+    if (data.sourceImages && data.sourceImages.length > 0) {
+        window._lastCarouselUrls = data.sourceImages;
+        window._lastCarouselCount = data.sourceImages.length;
+    }
+
     const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
 
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
@@ -609,7 +618,6 @@ function displayResults(data, platform) {
 
     // Prompt buttons row: Video + Image
     if (data.twisted) {
-        // Pass carousel count if we downloaded carousel items earlier
         const carouselCount = window._lastCarouselCount || 0;
         appendPromptButtons(container, data.twisted, data.original, platform, carouselCount);
         appendShareButton(container, {
