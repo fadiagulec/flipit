@@ -574,6 +574,16 @@ function displayResults(data, platform) {
     const container = document.getElementById('resultsContainer');
     container.innerHTML = '';
 
+    // Wire backend-extracted source-image URLs (og:image / Apify displayUrl)
+    // into the carousel state so the Image Prompt button auto-routes to
+    // /analyze-image (Vision-based recreation) instead of the text-only
+    // fallback. Without this, the whole IG-extract → faithful Image Prompt
+    // chain is silently broken even when extract-and-twist returns images.
+    if (Array.isArray(data.sourceImages) && data.sourceImages.length > 0) {
+        window._lastCarouselUrls = data.sourceImages.slice();
+        window._lastCarouselCount = data.sourceImages.length;
+    }
+
     // Carousel images preview
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');

@@ -6,6 +6,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
+const { assertPublicUrl } = require('./_ssrf_guard');
 
 exports.handler = async (event) => {
     const isPro = isProRequest(event);
@@ -58,7 +59,8 @@ exports.handler = async (event) => {
     // Surface user-actionable errors (size, fetch, claude) so the UI can guide them.
     const msg = err && err.message ? err.message : '';
     let userMsg = 'Image analysis failed. Please try again.';
-    if (/too large/i.test(msg)) userMsg = msg;
+    if (/blocked url|invalid url|only http|dns lookup/i.test(msg)) userMsg = 'That image URL is not allowed.';
+    else if (/too large/i.test(msg)) userMsg = msg;
     else if (/request too large|over.{0,5}limit/i.test(msg)) userMsg = 'Image too large for Claude — try a smaller post.';
     else if (/rate.?limit/i.test(msg)) userMsg = 'Hit the AI rate limit — wait 60 seconds and try again.';
     else if (/can't generate a recreate prompt/i.test(msg)) userMsg = msg;
@@ -78,6 +80,12 @@ exports.handler = async (event) => {
 // (Instagram CDN, TikTok thumbnails, Twitter media). This is the fix for
 // "Image analysis failed" on every carousel image.
 async function fetchImageAsBase64(imageUrl) {
+  // SSRF gate: reject private IPs, link-local (AWS IMDS), loopback, and
+  // DNS-rebinding attacks (attacker.com → 169.254.169.254). Without this an
+  // attacker could exfiltrate AWS credentials by posting a metadata URL and
+  // reading the base64 back from Claude's response.
+  await assertPublicUrl(imageUrl);
+
   const res = await fetch(imageUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

@@ -1,0 +1,10 @@
+{
+  "name": "flipit-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Netlify Functions for FlipIt. Declared so esbuild bundles @netlify/blobs and @netlify/functions reliably on cache-cleared builds — without this, _rate_limit.js falls open and every IP gets unbounded Anthropic spend.",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "@netlify/functions": "^2.8.0"
+  }
+}
