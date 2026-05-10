@@ -1,5 +1,6 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
+const { assertPublicUrl } = require('./_ssrf_guard');
 
 exports.handler = async function(event) {
     const isPro = isProRequest(event);
@@ -31,14 +32,14 @@ exports.handler = async function(event) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing or invalid url' }) };
   }
 
-  // Validate URL format
+  // Validate URL format + SSRF gate. assertPublicUrl rejects private IPs,
+  // link-local (AWS IMDS at 169.254.169.254), loopback, and DNS-rebinding
+  // (attacker.com → internal IP). Without this an attacker can use this
+  // endpoint to probe internal Netlify infra or steal cloud credentials.
   try {
-    const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid URL protocol' }) };
-    }
+    await assertPublicUrl(url);
   } catch {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid URL format' }) };
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid or blocked URL' }) };
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -68,10 +69,11 @@ exports.handler = async function(event) {
 
   // Step 1: Fetch the URL and extract text
   let originalText = '';
-  // Source-image URLs scraped alongside the caption (when available, e.g.
-  // from the Apify Instagram path). Surfaced to the frontend so the
-  // Image Prompt button can run AI Vision on the real post visuals
-  // without requiring the user to click Download Media first.
+  // Source-image URLs for the Image Prompt → AI Vision recreation chain.
+  // Populated from og:image (FB-crawler-UA fetch) and from Apify displayUrl /
+  // images[] / childPosts[].displayUrl. Returned in the success JSON so the
+  // frontend can wire window._lastCarouselUrls and route Image Prompt to
+  // /analyze-image instead of the text-only fallback.
   let sourceImages = [];
 
   // Detect platform
@@ -175,8 +177,8 @@ exports.handler = async function(event) {
               // Capture source image URLs so the frontend can run AI Vision
               // (analyze-image) on the actual post visuals — no manual
               // "Download Media first" step needed before clicking
-              // Image Prompt.
-              const collected = [];
+              // Image Prompt. Dedup + cap at 10 to bound payload size.
+              const collected = sourceImages.slice(); // start with og:image if any
               if (typeof item.displayUrl === 'string' && item.displayUrl.startsWith('http')) {
                 collected.push(item.displayUrl);
               }
@@ -214,6 +216,7 @@ exports.handler = async function(event) {
         body: JSON.stringify({
           success: false,
           embed: true,
+          sourceImages,
           message: "Couldn't read this Instagram post (it may be private, deleted, or behind a login). Copy the caption text and paste it into the Script Rewrite tab — or click Download Media first to use Image Prompt with AI Vision on the actual images."
         })
       };
@@ -245,7 +248,7 @@ exports.handler = async function(event) {
           statusCode: 200,
           headers,
           body: JSON.stringify({
-            original: null, twisted: null, prompt: null, embed: true,
+            original: null, twisted: null, prompt: null, embed: true, sourceImages,
             warning: 'Could not fetch that page. The video is embedded below if available. Try the Script Rewrite tab for the text.'
           })
         };
@@ -305,7 +308,7 @@ exports.handler = async function(event) {
           statusCode: 200,
           headers,
           body: JSON.stringify({
-            original: null, twisted: null, prompt: null, embed: true,
+            original: null, twisted: null, prompt: null, embed: true, sourceImages,
             warning: 'Could not extract enough text. The video is embedded below if available. Try the Script Rewrite tab.'
           })
         };
@@ -317,7 +320,7 @@ exports.handler = async function(event) {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          original: null, twisted: null, prompt: null, embed: true,
+          original: null, twisted: null, prompt: null, embed: true, sourceImages,
           warning: 'Could not reach this URL. Try the Script Rewrite tab.'
         })
       };
@@ -376,8 +379,8 @@ exports.handler = async function(event) {
         original: originalText,
         twisted: twisted,
         prompt: prompt,
-        sourceImages: sourceImages,
-        embed: true
+        embed: true,
+        sourceImages
       })
     };
 

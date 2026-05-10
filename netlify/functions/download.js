@@ -7,6 +7,7 @@ const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
+const { assertPublicUrl } = require('./_ssrf_guard');
 
 exports.handler = async (event) => {
     const isPro = isProRequest(event);
@@ -30,6 +31,16 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
   if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing url parameter' }) };
+
+  // SSRF gate: reject private IPs, link-local (AWS IMDS), loopback,
+  // and DNS-rebinding (attacker.com → 169.254.169.254). Without this an
+  // attacker can use this download proxy to hit internal Netlify infra
+  // or steal cloud credentials via the various tryRailway/tryCobalt paths.
+  try {
+    await assertPublicUrl(url);
+  } catch {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid or blocked URL' }) };
+  }
 
   const platform = detectPlatform(url);
 

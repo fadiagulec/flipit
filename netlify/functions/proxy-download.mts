@@ -9,6 +9,7 @@
 // GET /.netlify/functions/proxy-download?url=<urlencoded>&filename=<optional>
 
 import type { Context } from '@netlify/functions';
+import { promises as dns } from 'dns';
 
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT_MS = 25000;
@@ -46,6 +47,40 @@ function isBlockedHost(hostname: string): boolean {
     if (h.startsWith('fe80:') || h.startsWith('[fe80:')) return true;
     if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('[fc') || h.startsWith('[fd')) return true;
     return false;
+}
+
+// IP-only check, applied to the addresses returned by dns.lookup so that
+// a public hostname pointing at a private IP (DNS rebinding) is blocked.
+function isBlockedIp(ip: string): boolean {
+    if (!ip) return true;
+    const s = ip.toLowerCase();
+    if (s === '::1') return true;
+    if (s.startsWith('fe80:')) return true;
+    if (s.startsWith('fc') || s.startsWith('fd')) return true;
+    const v4mapped = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (v4mapped) return isBlockedIp(v4mapped[1]);
+    const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return false;
+    const a = +m[1], b = +m[2];
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true;
+    if (a === 224 || a >= 240) return true;
+    return false;
+}
+
+// DNS-rebinding defense: resolve and reject if ANY address is private.
+async function resolvesToBlockedIp(hostname: string): Promise<boolean> {
+    try {
+        const addrs = await dns.lookup(hostname, { all: true });
+        if (!addrs || addrs.length === 0) return true;
+        return addrs.some(a => isBlockedIp(a.address));
+    } catch {
+        return true;
+    }
 }
 
 function extractFilenameFromUrl(parsed: URL): string | null {
@@ -92,25 +127,52 @@ export default async (req: Request, _context: Context): Promise<Response> => {
     if (isBlockedHost(parsed.hostname)) {
         return jsonResponse(400, { error: 'Blocked hostname' });
     }
+    // DNS-rebinding defense: also reject if hostname resolves to a private IP.
+    if (await resolvesToBlockedIp(parsed.hostname)) {
+        return jsonResponse(400, { error: 'Blocked hostname' });
+    }
 
+    // Manually follow redirects so we can re-validate every hop. A public
+    // host can 302 to http://169.254.169.254/, and `redirect: 'follow'` would
+    // happily fetch it — bypassing the SSRF check above.
     let upstream: Response;
+    let currentUrl = parsed.toString();
+    let currentParsed = parsed;
     try {
-        upstream = await fetch(parsed.toString(), {
-            method: 'GET',
-            headers: {
-                'User-Agent': BROWSER_UA,
-                'Accept': '*/*',
-                // Some CDNs (e.g. Instagram) require a Referer that looks like
-                // a real browser origin to serve media. Mirror that here.
-                'Referer': parsed.protocol + '//' + parsed.hostname + '/'
-            },
-            redirect: 'follow',
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-        });
+        for (let hops = 0; hops < 5; hops++) {
+            upstream = await fetch(currentUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': BROWSER_UA,
+                    'Accept': '*/*',
+                    'Referer': currentParsed.protocol + '//' + currentParsed.hostname + '/'
+                },
+                redirect: 'manual',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+            });
+            if (upstream.status >= 300 && upstream.status < 400) {
+                const loc = upstream.headers.get('location');
+                if (!loc) break;
+                let nextParsed: URL;
+                try { nextParsed = new URL(loc, currentUrl); } catch { return jsonResponse(502, { error: 'Bad redirect.' }); }
+                if (nextParsed.protocol !== 'http:' && nextParsed.protocol !== 'https:') {
+                    return jsonResponse(502, { error: 'Bad redirect.' });
+                }
+                if (isBlockedHost(nextParsed.hostname) || await resolvesToBlockedIp(nextParsed.hostname)) {
+                    return jsonResponse(400, { error: 'Blocked redirect target.' });
+                }
+                currentUrl = nextParsed.toString();
+                currentParsed = nextParsed;
+                continue;
+            }
+            break;
+        }
     } catch (err) {
         console.error('Proxy fetch failed:', (err as Error)?.message);
         return jsonResponse(502, { error: 'Could not retrieve that file.' });
     }
+    // @ts-ignore — upstream is guaranteed assigned by the loop above
+    if (!upstream) return jsonResponse(502, { error: 'Could not retrieve that file.' });
 
     if (!upstream.ok) {
         console.error('Proxy upstream non-OK:', upstream.status);
