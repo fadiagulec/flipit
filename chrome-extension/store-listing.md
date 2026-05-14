@@ -206,8 +206,10 @@ https://flipit-app.netlify.app
 ## Support email
 
 ```
-TODO: enter the email you want users to contact at — Chrome requires a publicly listed support email. Suggest using a forwarding alias rather than a personal address.
+fadiagulec@gmail.com
 ```
+
+(Change this to a forwarding alias like `support@flipit.app` if/when you set up a custom domain — your personal Gmail will become publicly visible on the Web Store listing otherwise.)
 
 ---
 

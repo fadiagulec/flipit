@@ -13,3 +13,10 @@ flipit-extension-*.zip
 # Local audit scratch (not source-of-truth)
 AUDIT.md
 
+# Playwright / npm bits used locally to capture store screenshots
+package.json
+package-lock.json
+
+# Chrome Web Store submission scratch (regenerated locally)
+submission-assets/
+

@@ -30,6 +30,7 @@
         <div class="tabs">
             <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
             <button class="tab-btn" data-tab="trending-tab">🔥 Trending</button>
+            <button class="tab-btn" data-tab="instagram-tab">📱 Instagram</button>
             <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
             <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
             <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
@@ -89,6 +90,21 @@
                 </div>
             </div>
             <div id="trendingResultsContainer"></div>
+        </div>
+
+        <!-- Tab 1.7: Instagram Browse — search any handle/tag/URL and one-click Flip + Rate -->
+        <div id="instagram-tab" class="tab-content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="instagramQuery">Browse Instagram inside FlipIt</label>
+                    <input type="text" id="instagramQuery" placeholder="@creatorname or #hashtag or paste any Instagram post URL" maxlength="500" />
+                </div>
+                <div id="instagramErrorMessage"></div>
+                <div class="button-group">
+                    <button id="instagramBrowseBtn" class="btn-primary">📱 Browse Posts</button>
+                </div>
+            </div>
+            <div id="instagramResults"></div>
         </div>
 
         <!-- Tab 2: Script Rewrite -->
