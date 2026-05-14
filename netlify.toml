@@ -5,6 +5,29 @@
 [functions]
   node_bundler = "esbuild"
 
+# Per-function timeout overrides. Default standard-function timeout is 10s
+# (Free) / 26s (Pro). Claude calls for video/image prompts and post rating
+# can take 8-15s each, and on cold start the function has to load. We give
+# the AI-heavy endpoints the full 26s budget. video-prompts now fans out
+# 3 parallel Claude calls (Promise.all), so the bottleneck is the slowest
+# single call rather than 3 sequential.
+[functions."video-prompts"]
+  timeout = 26
+[functions."image-prompts"]
+  timeout = 26
+[functions."rate-post"]
+  timeout = 26
+[functions."extract-and-twist"]
+  timeout = 26
+[functions."rewrite-script"]
+  timeout = 26
+[functions."niche-ideas"]
+  timeout = 26
+[functions."analyze-image"]
+  timeout = 26
+[functions."instagram-browse"]
+  timeout = 26
+
 # Redirect API calls to Netlify Functions
 [[redirects]]
   from = "/api/generate"
