@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Short-form video mockup — FlipIt button</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:800px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#000;color:#fff}
+  .stage{width:1280px;height:800px;display:flex;justify-content:center;align-items:center;background:radial-gradient(circle at 50% 0%,#1a0a1e,#000 65%);position:relative}
+  /* Top app bar */
+  .topbar{position:absolute;top:0;left:0;right:0;height:54px;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);display:flex;align-items:center;padding:0 28px;gap:24px;border-bottom:1px solid #1c1c1c;color:#d8d8d8;font-size:14px}
+  .topbar .b{font-weight:800;letter-spacing:-0.5px;color:#fff;font-size:18px;margin-right:24px}
+  .topbar .pill{padding:6px 14px;border-radius:999px;background:#1c1c1c;font-size:13px;cursor:pointer}
+  .topbar .pill.active{background:#fff;color:#000}
+  .topbar .search{margin-left:auto;background:#1a1a1a;border-radius:999px;padding:8px 16px;color:#888;font-size:13px;width:240px}
+  /* Video frame */
+  .video-frame{width:420px;height:720px;border-radius:16px;background:
+    radial-gradient(circle at 30% 20%, rgba(194,24,91,0.5), transparent 55%),
+    radial-gradient(circle at 70% 80%, rgba(13,110,102,0.55), transparent 55%),
+    linear-gradient(180deg,#0e0a1f,#1a0710);
+    position:relative;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.7);border:1px solid #1f1f1f}
+  .play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.16);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;font-size:32px}
+  .vinfo{position:absolute;left:18px;bottom:28px;max-width:65%}
+  .vinfo .u{font-weight:700;font-size:15px;margin-bottom:6px}
+  .vinfo .cap{font-size:13px;line-height:1.4;color:#f0f0f0;text-shadow:0 2px 6px rgba(0,0,0,0.8)}
+  .vactions{position:absolute;right:14px;bottom:80px;display:flex;flex-direction:column;gap:22px;align-items:center}
+  .vactions .a{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,0.10);display:flex;align-items:center;justify-content:center;font-size:22px}
+  .vactions .c{font-size:11px;text-align:center;margin-top:4px;font-weight:600}
+  /* FlipIt FAB */
+  .flipit-fab{position:fixed;bottom:24px;right:24px;z-index:2147483647;background:linear-gradient(135deg,#ff7e5f,#feb47b);color:#fff;border:none;padding:12px 18px;border-radius:999px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 12px 28px rgba(0,0,0,0.50);display:inline-flex;align-items:center;gap:8px}
+  .flipit-fab .x{margin-left:6px;opacity:0.85;font-weight:900;padding:0 4px;border-radius:50%}
+  .arrow{position:fixed;bottom:74px;right:200px;color:#feb47b;font-weight:700;font-size:14px;text-shadow:0 2px 8px rgba(0,0,0,0.7);display:flex;align-items:center;gap:10px;pointer-events:none}
+  /* Bottom callout */
+  .callout{position:absolute;left:48px;top:50%;transform:translateY(-50%);max-width:260px;color:#e0e0e0;line-height:1.6}
+  .callout h2{font-size:34px;font-weight:800;line-height:1.15;margin-bottom:14px;background:linear-gradient(135deg,#feb47b,#ff7e5f);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  .callout p{font-size:15px;color:#aaa}
+  .right-callout{position:absolute;right:48px;top:50%;transform:translateY(-50%);max-width:240px;color:#e0e0e0}
+  .right-callout .label{font-size:12px;color:#feb47b;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+  .right-callout .body{font-size:14px;color:#bbb;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="topbar">
+    <div class="b">ShortFeed</div>
+    <div class="pill">Following</div>
+    <div class="pill active">For You</div>
+    <div class="pill">Explore</div>
+    <div class="search">🔎 Search</div>
+  </div>
+  <div class="callout">
+    <h2>One button. Any reel. Instant flip.</h2>
+    <p>Stops getting in your way the moment you dismiss it. Pops back next session.</p>
+  </div>
+  <div class="video-frame">
+    <div class="play">▶</div>
+    <div class="vinfo">
+      <div class="u">@viral.creator · Original sound</div>
+      <div class="cap">3 hooks that hit 12M views — let me show you the formula 🧠 #creatortips #viralhook</div>
+    </div>
+    <div class="vactions">
+      <div>
+        <div class="a">♥</div>
+        <div class="c">1.2M</div>
+      </div>
+      <div>
+        <div class="a">💬</div>
+        <div class="c">28.4K</div>
+      </div>
+      <div>
+        <div class="a">↗</div>
+        <div class="c">204K</div>
+      </div>
+      <div>
+        <div class="a">🔖</div>
+      </div>
+    </div>
+  </div>
+  <div class="right-callout">
+    <div class="label">→ FlipIt button</div>
+    <div class="body">Bottom-right of every supported reel, video, or post. Dismissable with the × if you just want to scroll.</div>
+  </div>
+</div>
+<button class="flipit-fab">🎯 Rate with FlipIt<span class="x">×</span></button>
+</body>
+</html>

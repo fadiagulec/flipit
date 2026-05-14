@@ -1482,6 +1482,235 @@ function showSuccess(msg, id) {
     });
 })();
 
+// ── TAB: 📱 INSTAGRAM BROWSE (Apify-backed) ─────────────────
+// Browse posts by @creator, #hashtag, or a direct post URL — and
+// one-click "Flip & Rate" any of them without leaving FlipIt.
+(function wireInstagramBrowseTab() {
+    const btn = document.getElementById('instagramBrowseBtn');
+    if (!btn) return;
+    const queryInput = document.getElementById('instagramQuery');
+    const container = document.getElementById('instagramResults');
+
+    function fmtNum(n) {
+        n = Number(n) || 0;
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(n);
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        const now = new Date();
+        const diffDays = Math.floor((now - d) / 86400000);
+        if (diffDays < 1) return 'today';
+        if (diffDays === 1) return '1d ago';
+        if (diffDays < 7) return diffDays + 'd ago';
+        if (diffDays < 30) return Math.floor(diffDays / 7) + 'w ago';
+        if (diffDays < 365) return Math.floor(diffDays / 30) + 'mo ago';
+        return Math.floor(diffDays / 365) + 'y ago';
+    }
+
+    function renderPosts(posts) {
+        container.innerHTML = '';
+        if (!posts || posts.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'result-section';
+            empty.innerHTML = '<h3>🔍 No posts found</h3><p class="result-text">No posts found. Try a different username or hashtag.</p>';
+            container.appendChild(empty);
+            return;
+        }
+
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:10px;';
+
+        posts.forEach((p) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border-radius:14px;border:1px solid #e8e4de;display:flex;flex-direction:column;gap:8px;overflow:hidden;';
+
+            // Thumbnail
+            if (p.thumbnail) {
+                const thumb = document.createElement('img');
+                thumb.src = '/.netlify/functions/proxy-download?url=' + encodeURIComponent(p.thumbnail);
+                thumb.alt = 'Instagram post by ' + (p.owner || 'unknown');
+                thumb.loading = 'lazy';
+                thumb.style.cssText = 'width:100%;max-height:280px;height:280px;object-fit:cover;background:#f0eee9;display:block;';
+                thumb.addEventListener('error', () => { thumb.style.display = 'none'; });
+                card.appendChild(thumb);
+            }
+
+            const padded = document.createElement('div');
+            padded.style.cssText = 'padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;flex:1;';
+
+            // Owner + date row
+            const head = document.createElement('div');
+            head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#0d6e66;font-weight:700;gap:8px;';
+            const owner = document.createElement('span');
+            owner.textContent = p.owner || '@unknown';
+            owner.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+            const dateEl = document.createElement('span');
+            dateEl.style.cssText = 'color:#888;font-weight:500;font-size:12px;flex-shrink:0;';
+            dateEl.textContent = fmtDate(p.postedAt);
+            head.appendChild(owner);
+            head.appendChild(dateEl);
+            padded.appendChild(head);
+
+            // Type badges (carousel / video)
+            if (p.isCarousel || p.isVideo) {
+                const badges = document.createElement('div');
+                badges.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+                if (p.isVideo) {
+                    const b = document.createElement('span');
+                    b.style.cssText = 'background:#eef9f7;color:#0a9b8e;border:1px solid #c8ecea;padding:1px 8px;border-radius:6px;font-size:11px;font-weight:600;';
+                    b.textContent = '▶ Video';
+                    badges.appendChild(b);
+                }
+                if (p.isCarousel) {
+                    const b = document.createElement('span');
+                    b.style.cssText = 'background:#fff4e6;color:#a85b00;border:1px solid #f0d8b5;padding:1px 8px;border-radius:6px;font-size:11px;font-weight:600;';
+                    b.textContent = '🖼 Carousel';
+                    badges.appendChild(b);
+                }
+                padded.appendChild(badges);
+            }
+
+            // Caption preview (first 120 chars)
+            const rawCap = (p.caption || '').toString();
+            const capText = rawCap.length > 120 ? rawCap.slice(0, 120) + '…' : rawCap;
+            const cap = document.createElement('p');
+            cap.style.cssText = 'color:#444;font-size:14px;line-height:1.4;margin:0;';
+            cap.innerHTML = escapeHtml(capText || '(no caption)');
+            padded.appendChild(cap);
+
+            // Engagement
+            const stats = document.createElement('div');
+            stats.style.cssText = 'display:flex;gap:14px;font-size:12px;color:#888;flex-wrap:wrap;';
+            stats.innerHTML =
+                '<span>❤️ ' + fmtNum(p.likes) + '</span>' +
+                '<span>💬 ' + fmtNum(p.comments) + '</span>';
+            padded.appendChild(stats);
+
+            // Actions row
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;gap:8px;margin-top:auto;padding-top:6px;';
+
+            const flipBtn = document.createElement('button');
+            flipBtn.textContent = '🎯 Flip & Rate';
+            flipBtn.style.cssText = 'flex:1;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;padding:10px 12px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+            flipBtn.addEventListener('click', () => flipAndRate(p));
+
+            const openBtn = document.createElement('a');
+            openBtn.textContent = '🔗 Open Post';
+            openBtn.href = p.url;
+            openBtn.target = '_blank';
+            openBtn.rel = 'noopener';
+            openBtn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:10px 12px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none;text-align:center;flex:1;';
+
+            actions.appendChild(flipBtn);
+            actions.appendChild(openBtn);
+            padded.appendChild(actions);
+
+            card.appendChild(padded);
+            grid.appendChild(card);
+        });
+
+        container.appendChild(grid);
+    }
+
+    // Switch to URL Extract tab, drop the post URL in, click Extract, then
+    // wait for the rendered flip output and auto-click "Rate This Post".
+    function flipAndRate(post) {
+        if (!post || !post.url) return;
+        if (typeof switchTab === 'function') switchTab('url-tab');
+        const urlInput = document.getElementById('urlInput');
+        if (urlInput) {
+            urlInput.value = post.url;
+            urlInput.dispatchEvent(new Event('input'));
+        }
+        const extractBtn = document.getElementById('extractBtn');
+        const resultsContainer = document.getElementById('resultsContainer');
+        if (!extractBtn) return;
+        extractBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Click Extract. The Trending tab uses a 250ms delay so the tab swap
+        // settles before the click — mirror that.
+        setTimeout(() => extractBtn.click(), 250);
+
+        // Poll for the "Rate This Post" button to appear in the results, then
+        // auto-click it. Bail after ~90s so we don't poll forever on errors.
+        const startedAt = Date.now();
+        const TIMEOUT_MS = 90000;
+        const tick = () => {
+            if (Date.now() - startedAt > TIMEOUT_MS) return;
+            // Find the rate button by its visible text (it's appended to the
+            // results container after a successful flip).
+            const candidates = resultsContainer
+                ? resultsContainer.querySelectorAll('button')
+                : document.querySelectorAll('button');
+            for (const b of candidates) {
+                const t = (b.textContent || '').trim();
+                if (t.indexOf('Rate This Post') !== -1) {
+                    if (!b.dataset.flipitAutoRated) {
+                        b.dataset.flipitAutoRated = '1';
+                        b.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        setTimeout(() => b.click(), 200);
+                    }
+                    return;
+                }
+            }
+            setTimeout(tick, 500);
+        };
+        setTimeout(tick, 1500);
+    }
+
+    btn.addEventListener('click', async () => {
+        const query = (queryInput && queryInput.value.trim()) || '';
+        if (!query) {
+            showError('Enter a @username, #hashtag, or Instagram post URL.', 'instagramErrorMessage');
+            return;
+        }
+        if (!gateOrPaywall()) return;
+
+        const originalLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Searching Instagram…';
+        container.innerHTML = '<div class="loading">⏳ Searching Instagram…</div>';
+
+        try {
+            const res = await fetch('/.netlify/functions/instagram-browse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, limit: 12 })
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.status === 429) {
+                container.innerHTML = '';
+                showError('⚠️ ' + (data.error || 'Daily flip limit reached.'), 'instagramErrorMessage');
+                return;
+            }
+            if (!res.ok || !Array.isArray(data.posts)) {
+                container.innerHTML = '';
+                showError('❌ ' + (data.error || 'Browse failed. Please try again.'), 'instagramErrorMessage');
+                return;
+            }
+
+            renderPosts(data.posts);
+            if (data.posts.length > 0 && typeof recordFlipSuccess === 'function') {
+                recordFlipSuccess();
+            }
+        } catch (err) {
+            console.error('Instagram browse error:', err);
+            container.innerHTML = '';
+            showError('❌ ' + (err.message || 'Could not browse Instagram. Please try again.'), 'instagramErrorMessage');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalLabel;
+        }
+    });
+})();
+
 // ── 🔗 AUTO-FLIP FROM URL PARAM ───────────────────────────
 // Honors ?url= or ?u= in the page URL so the Chrome extension /
 // bookmarklet / share buttons / any external referrer can deep-link

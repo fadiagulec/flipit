@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FlipIt rating card mockup</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:800px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#faf8f5;color:#1a1a2e}
+  header{padding:18px 0;text-align:center;border-bottom:1px solid #e8e4de;background:#fff}
+  .logo{font-size:38px;font-weight:800;background:linear-gradient(135deg,#0d6e66,#c2185b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  .tag{font-size:14px;color:#5a5a6a;margin-top:4px}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 24px;display:grid;grid-template-columns:1.2fr 1fr;gap:24px}
+  .card{background:#fff;border-radius:16px;padding:24px;box-shadow:0 8px 32px rgba(13,110,102,0.08);border:1px solid #efece6}
+  .card h2{font-size:18px;font-weight:800;margin-bottom:16px;color:#0d6e66;display:flex;align-items:center;gap:8px}
+  .url-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f4f1eb;border-radius:10px;font-size:13px;color:#444;margin-bottom:16px;border:1px dashed #d3cdc1}
+  .url-row .src{font-weight:700;color:#0d6e66}
+  /* Score */
+  .score-top{display:flex;align-items:center;gap:18px;margin-bottom:18px}
+  .score-ring{width:104px;height:104px;border-radius:50%;background:conic-gradient(#0d6e66 0 78%,#e8e4de 78% 100%);display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}
+  .score-ring::before{content:"";position:absolute;inset:8px;border-radius:50%;background:#fff}
+  .score-ring .num{position:relative;font-size:32px;font-weight:800;color:#0d6e66}
+  .score-meta{flex:1}
+  .score-meta .grade{font-size:24px;font-weight:800;color:#1a1a2e}
+  .score-meta .sub{font-size:13px;color:#5a5a6a;margin-top:2px;line-height:1.5}
+  /* dims */
+  .dims{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .dim{padding:12px;background:#f9f6f0;border-radius:10px;border:1px solid #efece6}
+  .dim .label{font-size:11px;color:#5a5a6a;text-transform:uppercase;letter-spacing:0.5px;font-weight:700}
+  .dim .bar{height:8px;background:#e8e4de;border-radius:99px;margin-top:6px;overflow:hidden}
+  .dim .bar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#0d6e66,#c2185b)}
+  .dim .val{font-size:11px;font-weight:700;color:#0d6e66;margin-top:4px}
+  /* right column — flipped script */
+  .script-card .hook{padding:14px;background:#fff7f0;border-left:3px solid #ff7e5f;border-radius:8px;font-size:14px;line-height:1.5;color:#3a3a4a;margin-bottom:12px;font-style:italic}
+  .script-card .scene{padding:12px 14px;border-radius:8px;background:#f4f1eb;font-size:13px;color:#3a3a4a;line-height:1.55;margin-bottom:8px}
+  .scene .t{font-size:11px;font-weight:800;color:#c2185b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
+  .actions{display:flex;gap:10px;margin-top:14px}
+  .btn{padding:11px 16px;border-radius:10px;font-weight:700;font-size:13px;border:none;cursor:pointer}
+  .btn-primary{background:linear-gradient(135deg,#0d6e66,#0a544e);color:#fff}
+  .btn-secondary{background:#fff;color:#0d6e66;border:1.5px solid #0d6e66}
+  .rate-btn{display:inline-flex;align-items:center;gap:6px;background:#0d6e66;color:#fff;padding:8px 14px;border-radius:99px;font-weight:700;font-size:12px;border:none;cursor:pointer;margin-bottom:14px}
+  .footer-tip{max-width:1100px;margin:14px auto 0;padding:0 24px;font-size:12px;color:#888;text-align:center}
+  .footer-tip strong{color:#0d6e66}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">FlipIt</div>
+  <div class="tag">See It. Flip It. Post It. Go Viral.</div>
+</header>
+<div class="wrap">
+  <div class="card">
+    <h2>📊 Viral Potential Score</h2>
+    <div class="url-row">
+      <span class="src">Source:</span>
+      <span>instagram.com/reel/Cx…viral-hook</span>
+    </div>
+    <button class="rate-btn">📊 Rate This Post</button>
+    <div class="score-top">
+      <div class="score-ring"><div class="num">78</div></div>
+      <div class="score-meta">
+        <div class="grade">Strong viral fit</div>
+        <div class="sub">Top 22% of posts in this niche. The hook lands fast and the curiosity gap holds through the first 3 seconds.</div>
+      </div>
+    </div>
+    <div class="dims">
+      <div class="dim"><div class="label">Hook</div><div class="bar"><div class="bar-fill" style="width:88%"></div></div><div class="val">88 / 100</div></div>
+      <div class="dim"><div class="label">Pacing</div><div class="bar"><div class="bar-fill" style="width:74%"></div></div><div class="val">74 / 100</div></div>
+      <div class="dim"><div class="label">Emotional pull</div><div class="bar"><div class="bar-fill" style="width:81%"></div></div><div class="val">81 / 100</div></div>
+      <div class="dim"><div class="label">Curiosity gap</div><div class="bar"><div class="bar-fill" style="width:79%"></div></div><div class="val">79 / 100</div></div>
+      <div class="dim"><div class="label">Replay value</div><div class="bar"><div class="bar-fill" style="width:70%"></div></div><div class="val">70 / 100</div></div>
+      <div class="dim"><div class="label">Sharability</div><div class="bar"><div class="bar-fill" style="width:76%"></div></div><div class="val">76 / 100</div></div>
+    </div>
+  </div>
+  <div class="card script-card">
+    <h2>✍️ Your Flipped Script</h2>
+    <div class="hook">"Stop scrolling — this is the hook formula that made me 12M views last month, and it works in any niche."</div>
+    <div class="scene"><div class="t">Scene 1 · 0–2s</div>Close-up, direct-to-camera. Hold the object/object-reveal moment for 2 full beats before any cut.</div>
+    <div class="scene"><div class="t">Scene 2 · 2–6s</div>Pivot to the "but here's what nobody tells you" line. Add a punchy text overlay synced to the beat drop.</div>
+    <div class="scene"><div class="t">Scene 3 · 6–14s</div>Demonstration / payoff. Keep the camera tight on the result, no wide shots.</div>
+    <div class="actions">
+      <button class="btn btn-primary">📋 Copy Script</button>
+      <button class="btn btn-secondary">📸 Get Image Prompts</button>
+    </div>
+  </div>
+</div>
+<div class="footer-tip">💡 <strong>Tip:</strong> install the FlipIt Chrome extension to skip the URL-paste step from any reel, video, or post.</div>
+</body>
+</html>
