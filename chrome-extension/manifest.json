@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "FlipIt — Rate & Flip Posts",
+  "short_name": "FlipIt",
+  "version": "1.0.0",
+  "description": "Rate any Instagram post (or TikTok / YouTube / LinkedIn) for viral potential, or flip it into a new viral script — one click, no copy/paste.",
+  "permissions": ["activeTab"],
+  "host_permissions": [
+    "*://*.instagram.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.youtube.com/*",
+    "*://*.linkedin.com/*",
+    "*://*.threads.net/*",
+    "*://*.facebook.com/*",
+    "*://*.twitter.com/*",
+    "*://*.x.com/*"
+  ],
+  "action": {
+    "default_title": "Rate this post with FlipIt",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.instagram.com/*",
+        "*://www.tiktok.com/*",
+        "*://www.youtube.com/*",
+        "*://www.linkedin.com/*",
+        "*://www.threads.net/*",
+        "*://www.facebook.com/*",
+        "*://twitter.com/*",
+        "*://x.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

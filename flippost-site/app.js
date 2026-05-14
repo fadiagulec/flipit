@@ -601,15 +601,6 @@ function displayResults(data, platform) {
         container.appendChild(wrap);
     }
 
-    // Source images scraped server-side (e.g. Apify Instagram path).
-    // Stash them in the same global the carousel-download flow uses so
-    // the Image Prompt button auto-runs AI Vision on the actual post
-    // visuals \u2014 no need for the user to click Download Media first.
-    if (data.sourceImages && data.sourceImages.length > 0) {
-        window._lastCarouselUrls = data.sourceImages;
-        window._lastCarouselCount = data.sourceImages.length;
-    }
-
     const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
 
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
@@ -620,12 +611,166 @@ function displayResults(data, platform) {
     if (data.twisted) {
         const carouselCount = window._lastCarouselCount || 0;
         appendPromptButtons(container, data.twisted, data.original, platform, carouselCount);
+        appendRateButton(container, {
+            original: data.original || '',
+            twisted: data.twisted,
+            platform: platform || ''
+        });
         appendShareButton(container, {
             twisted: data.twisted,
             hook: data.prompt || '',
             platform: platform || ''
         });
     }
+}
+
+// ── 📊 RATE THIS POST ─────────────────────────────────────
+// Scores the flipped post on 6 dimensions (hook, scroll-stop, niche clarity,
+// emotional resonance, CTA, originality) via /rate-post and renders a
+// score card with verdict + per-dimension breakdown + improvements.
+function appendRateButton(container, payload) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center;';
+
+    const rateBtn = document.createElement('button');
+    rateBtn.className = 'btn-secondary';
+    rateBtn.style.cssText = 'background:linear-gradient(135deg,#ffb347,#ff7e5f);color:#fff;border:none;padding:12px 24px;font-weight:700;border-radius:10px;cursor:pointer;font-size:15px;';
+    rateBtn.textContent = '\u{1F4CA} Rate This Post';
+    wrap.appendChild(rateBtn);
+    container.appendChild(wrap);
+
+    // Result card lives below the button, populated on click.
+    const cardHolder = document.createElement('div');
+    cardHolder.style.cssText = 'margin-top:16px;';
+    container.appendChild(cardHolder);
+
+    rateBtn.addEventListener('click', async () => {
+        const originalLabel = rateBtn.textContent;
+        rateBtn.disabled = true;
+        rateBtn.style.opacity = '0.7';
+        rateBtn.textContent = '⏳ Analyzing…';
+        cardHolder.innerHTML = '';
+
+        try {
+            const resp = await fetch('/.netlify/functions/rate-post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    original: payload.original,
+                    twisted: payload.twisted,
+                    platform: payload.platform
+                })
+            });
+            if (resp.status === 429) {
+                const data = await resp.json().catch(() => ({}));
+                cardHolder.innerHTML = `<div style="background:#fff3cd;border:1px solid #ffc107;padding:14px;border-radius:10px;color:#664d03;">${data.message || 'You’ve hit today’s rate limit.'}</div>`;
+                return;
+            }
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                cardHolder.innerHTML = `<div style="background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;">${data.error || 'Rating failed. Try again.'}</div>`;
+                return;
+            }
+            const rating = await resp.json();
+            renderRatingCard(cardHolder, rating);
+        } catch (err) {
+            console.error('rate-post error', err);
+            cardHolder.innerHTML = '<div style="background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;">Couldn’t reach the rater. Check your connection and try again.</div>';
+        } finally {
+            rateBtn.disabled = false;
+            rateBtn.style.opacity = '1';
+            rateBtn.textContent = originalLabel;
+        }
+    });
+}
+
+function renderRatingCard(host, rating) {
+    host.innerHTML = '';
+    if (!rating || typeof rating.overall !== 'number') {
+        host.innerHTML = '<div style="color:#842029;">Rating response was malformed.</div>';
+        return;
+    }
+
+    // Overall + verdict header
+    const card = document.createElement('div');
+    card.style.cssText = 'background:linear-gradient(135deg,#fff8f0,#fffaf3);border:2px solid #ffb347;border-radius:14px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,0.06);';
+
+    const scoreColor = rating.overall >= 75 ? '#0a9b8e' : rating.overall >= 60 ? '#c79100' : rating.overall >= 40 ? '#cc7a00' : '#b91c1c';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px;';
+    header.innerHTML = `
+        <div style="font-size:48px;font-weight:900;color:${scoreColor};line-height:1;">${rating.overall}<span style="font-size:18px;color:#999;font-weight:600;">/100</span></div>
+        <div style="font-size:20px;font-weight:700;color:#1a1a2e;">${escapeHtml(rating.verdict || '')}</div>
+    `;
+    card.appendChild(header);
+
+    // 6 dimensions
+    if (Array.isArray(rating.dimensions) && rating.dimensions.length) {
+        const dimsWrap = document.createElement('div');
+        dimsWrap.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:18px;';
+        for (const d of rating.dimensions) {
+            const dColor = d.score >= 75 ? '#0a9b8e' : d.score >= 60 ? '#c79100' : d.score >= 40 ? '#cc7a00' : '#b91c1c';
+            const dim = document.createElement('div');
+            dim.style.cssText = 'background:#fff;border:1px solid #f0e0c8;padding:12px;border-radius:10px;';
+            dim.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+                    <strong style="color:#1a1a2e;font-size:14px;">${escapeHtml(d.name)}</strong>
+                    <span style="font-weight:800;color:${dColor};font-size:16px;">${d.score}</span>
+                </div>
+                <div style="margin-top:6px;font-size:13px;color:#555;line-height:1.4;">${escapeHtml(d.why)}</div>
+                <div style="margin-top:6px;font-size:12px;color:#0d6e66;line-height:1.4;"><strong>Fix:</strong> ${escapeHtml(d.improve)}</div>
+            `;
+            dimsWrap.appendChild(dim);
+        }
+        card.appendChild(dimsWrap);
+    }
+
+    // Working / Fix bullets
+    const twoCol = document.createElement('div');
+    twoCol.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;';
+    if (Array.isArray(rating.working) && rating.working.length) {
+        const working = document.createElement('div');
+        working.innerHTML = `<h4 style="margin:0 0 8px;color:#0a9b8e;font-size:14px;">✅ What’s working</h4><ul style="margin:0;padding-left:18px;font-size:13px;color:#333;line-height:1.5;">${rating.working.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`;
+        twoCol.appendChild(working);
+    }
+    if (Array.isArray(rating.fix) && rating.fix.length) {
+        const fix = document.createElement('div');
+        fix.innerHTML = `<h4 style="margin:0 0 8px;color:#cc7a00;font-size:14px;">\u{1F527} Fix first</h4><ul style="margin:0;padding-left:18px;font-size:13px;color:#333;line-height:1.5;">${rating.fix.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`;
+        twoCol.appendChild(fix);
+    }
+    card.appendChild(twoCol);
+
+    // Copy-paste hook
+    if (rating.copy_paste_hook) {
+        const hookWrap = document.createElement('div');
+        hookWrap.style.cssText = 'margin-top:16px;background:#fff;border:1px dashed #0d6e66;border-radius:10px;padding:12px;';
+        hookWrap.innerHTML = `<div style="font-size:12px;color:#0d6e66;font-weight:700;margin-bottom:4px;">\u{1F3AF} Stronger hook (tap to copy)</div><div id="rateCopyHook" style="font-size:14px;color:#1a1a2e;cursor:pointer;line-height:1.4;">${escapeHtml(rating.copy_paste_hook)}</div>`;
+        card.appendChild(hookWrap);
+        // wire copy on the dynamically inserted element
+        setTimeout(() => {
+            const el = document.getElementById('rateCopyHook');
+            if (!el) return;
+            el.addEventListener('click', () => {
+                navigator.clipboard.writeText(rating.copy_paste_hook).then(() => {
+                    const prev = el.textContent;
+                    el.textContent = '✅ Copied!';
+                    setTimeout(() => { el.textContent = prev; }, 1400);
+                });
+            });
+        }, 0);
+    }
+
+    host.appendChild(card);
+}
+
+function escapeHtml(s) {
+    return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 // ── SHAREABLE FLIP URL ────────────────────────────────────
@@ -1335,4 +1480,47 @@ function showSuccess(msg, id) {
             btn.textContent = original;
         }
     });
+})();
+
+// ── 🔗 AUTO-FLIP FROM URL PARAM ───────────────────────────
+// Honors ?url= or ?u= in the page URL so the Chrome extension /
+// bookmarklet / share buttons / any external referrer can deep-link
+// directly into a flip. Example:
+//   https://flipit-app.netlify.app/?url=https%3A%2F%2Finstagram.com%2Fp%2FXYZ
+// Validates the inbound URL (must be http(s) and on a known social
+// platform) before auto-clicking Extract — prevents abuse where a
+// random page redirects users into running flips on attacker URLs.
+(function autoFlipFromQuery() {
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        const raw = (params.get('url') || params.get('u') || '').trim();
+        if (!raw) return;
+        let parsed;
+        try { parsed = new URL(raw); } catch { return; }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+        const allowedHosts = /(?:^|\.)(instagram\.com|instagr\.am|tiktok\.com|youtube\.com|youtu\.be|linkedin\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|threads\.net)$/i;
+        if (!allowedHosts.test(parsed.hostname)) return;
+
+        const fire = () => {
+            if (typeof switchTab === 'function') switchTab('url-tab');
+            const urlInput = document.getElementById('urlInput');
+            if (urlInput) {
+                urlInput.value = raw;
+                urlInput.dispatchEvent(new Event('input'));
+            }
+            const extractBtn = document.getElementById('extractBtn');
+            if (extractBtn) {
+                extractBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => extractBtn.click(), 300);
+            }
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', fire);
+        } else {
+            fire();
+        }
+    } catch (e) {
+        console.warn('autoFlipFromQuery failed:', e);
+    }
 })();

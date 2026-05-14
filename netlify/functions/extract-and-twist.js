@@ -56,14 +56,8 @@ exports.handler = async function(event) {
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&nbsp;/g, ' ')
-      .replace(/&#x2026;/g, 'â¦')
-      .replace(/&#x2019;/g, 'â')
-      .replace(/&#x2018;/g, 'â')
-      .replace(/&#x201c;/g, 'â')
-      .replace(/&#x201d;/g, 'â')
-      .replace(/&#x2014;/g, 'â')
-      .replace(/&#x2013;/g, 'â')
-      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+      // (Removed mojibake mappings — generic sweeps below handle smart quotes correctly.)
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
       .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
   }
 
