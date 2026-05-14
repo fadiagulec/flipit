@@ -3,7 +3,15 @@
   "name": "FlipIt — Rate & Flip Posts",
   "short_name": "FlipIt",
   "version": "1.0.0",
-  "description": "Rate any Instagram post (or TikTok / YouTube / LinkedIn) for viral potential, or flip it into a new viral script — one click, no copy/paste.",
+  "description": "Rate any Instagram/TikTok/YouTube post for viral potential and flip it into your own viral script — one click, no copy-paste.",
+  "author": "FlipIt",
+  "homepage_url": "https://flipit-app.netlify.app",
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
   "permissions": ["activeTab"],
   "host_permissions": [
     "*://*.instagram.com/*",
@@ -17,7 +25,13 @@
   ],
   "action": {
     "default_title": "Rate this post with FlipIt",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
   },
   "content_scripts": [
     {

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlipIt — Privacy Policy</title>
+    <meta name="description" content="FlipIt privacy policy — what the FlipIt web app and Chrome extension do (and don't do) with your data.">
+    <meta name="robots" content="index,follow">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .legal {
+            background: #ffffff;
+            padding: 32px;
+            border-radius: 16px;
+            border: 1px solid #e8e4de;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+            margin-bottom: 40px;
+        }
+        .legal h2 {
+            color: #0d6e66;
+            font-size: 22px;
+            margin: 24px 0 10px;
+        }
+        .legal h2:first-child { margin-top: 0; }
+        .legal p, .legal li {
+            font-size: 16px;
+            color: #1a1a2e;
+            line-height: 1.7;
+        }
+        .legal ul { padding-left: 22px; margin: 8px 0 16px; }
+        .legal .updated {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 24px;
+        }
+        .legal a { color: #0d6e66; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="/" class="logo">FlipIt</a>
+            <p class="tagline">Privacy Policy</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="legal">
+            <p class="updated">Last updated: May 14, 2026</p>
+
+            <h2>Short version</h2>
+            <p>
+                FlipIt does not collect personal information, does not use cookies for tracking,
+                does not run analytics scripts, and does not sell or share data with third parties.
+                The Chrome extension only opens FlipIt with the URL of the page you're currently on,
+                and only when you click the FlipIt button.
+            </p>
+
+            <h2>What the Chrome extension does</h2>
+            <p>
+                The FlipIt Chrome extension injects a single floating button (&ldquo;Rate with FlipIt&rdquo;)
+                onto post pages on Instagram, TikTok, YouTube, LinkedIn, Threads, Twitter/X, and Facebook.
+                When you click that button (or the FlipIt toolbar icon), it opens a new tab to
+                <a href="https://flipit-app.netlify.app">flipit-app.netlify.app</a> with the current
+                page's URL appended as a query parameter so FlipIt knows which post to analyze.
+            </p>
+            <p>That is the entire behavior. The extension:</p>
+            <ul>
+                <li>Does <strong>not</strong> read the contents of pages you visit.</li>
+                <li>Does <strong>not</strong> scrape post text, comments, DMs, or messages.</li>
+                <li>Does <strong>not</strong> run in the background — it has no background worker.</li>
+                <li>Does <strong>not</strong> send data to any server from the extension itself.</li>
+                <li>Does <strong>not</strong> store anything in cloud storage. The only local state
+                is a single &ldquo;hide for this session&rdquo; flag in <code>sessionStorage</code>,
+                which is cleared when the tab closes.</li>
+                <li>Does <strong>not</strong> use cookies, advertising IDs, or fingerprinting.</li>
+            </ul>
+
+            <h2>What the FlipIt web app does</h2>
+            <p>
+                When you submit a URL (whether typed in directly or passed from the extension),
+                FlipIt fetches a public preview of the post via third-party extraction services
+                (Apify, oEmbed) and sends a description of the post to an AI model (Anthropic Claude
+                and/or OpenAI) to produce a viral-potential rating and a rewritten script.
+                The post URL is processed only for as long as it takes to return a result and is not
+                retained in a user database.
+            </p>
+
+            <h2>Information we do not collect</h2>
+            <ul>
+                <li>Names, emails, addresses, phone numbers, or any other personal identifiers.</li>
+                <li>Account login credentials for Instagram, TikTok, or any other platform.</li>
+                <li>Health, financial, location, or authentication information.</li>
+                <li>Personal communications.</li>
+                <li>Browsing history.</li>
+            </ul>
+
+            <h2>Third-party services</h2>
+            <p>
+                The FlipIt web app uses these third parties only to fulfill your request:
+            </p>
+            <ul>
+                <li><strong>Netlify</strong> — hosts the web app and the serverless functions that
+                proxy your URL request. Netlify may log standard request metadata (IP, user agent)
+                as part of normal web hosting.</li>
+                <li><strong>Apify</strong> — extracts the public post preview from the URL you submit.</li>
+                <li><strong>Anthropic and/or OpenAI</strong> — runs the AI model that scores and rewrites
+                the post. Only the post content and your prompt are sent; no user identity is attached.</li>
+            </ul>
+
+            <h2>Permissions the extension requests</h2>
+            <ul>
+                <li><strong>activeTab</strong> — lets us read the URL of the tab you're currently on
+                <em>only</em> when you click the FlipIt toolbar icon. We use this URL to open FlipIt
+                with the right post pre-filled.</li>
+                <li><strong>Host permissions</strong> for instagram.com, tiktok.com, youtube.com,
+                linkedin.com, threads.net, facebook.com, twitter.com, and x.com — required for the
+                content script to inject the floating button on those sites. The script only injects
+                a button; it does not read or modify the page's data.</li>
+            </ul>
+
+            <h2>Children</h2>
+            <p>
+                FlipIt is not directed to children under 13 and does not knowingly collect data
+                from anyone.
+            </p>
+
+            <h2>Changes to this policy</h2>
+            <p>
+                If we ever change what the extension or web app does with data, we will update this
+                page and bump the &ldquo;Last updated&rdquo; date.
+            </p>
+
+            <h2>Contact</h2>
+            <p>
+                Questions: open an issue at
+                <a href="https://github.com/fadiagulec/flipit" target="_blank" rel="noopener">github.com/fadiagulec/flipit</a>.
+            </p>
+        </div>
+    </main>
+</body>
+</html>
