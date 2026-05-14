@@ -3,3 +3,13 @@
 
 # Node modules
 node_modules/
+
+# Claude Code workspace metadata
+.claude/
+
+# Chrome extension build artifacts (regenerable; not source)
+flipit-extension-*.zip
+
+# Local audit scratch (not source-of-truth)
+AUDIT.md
+
