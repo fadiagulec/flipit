@@ -13,11 +13,18 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
-const APIFY_TIMEOUT_MS = 60000;
+// MUST stay strictly under the 26s Netlify function timeout (netlify.toml
+// gives this function 26s). Apify's run-sync endpoint takes ~12-20s for a
+// fresh username/hashtag fetch; we cap at 22s to leave headroom for JSON
+// parse + response serialization. Setting this to 60s previously caused
+// every browse call to 504 in production.
+const APIFY_TIMEOUT_MS = 22000;
 const APIFY_TIMEOUT_SEC = Math.floor(APIFY_TIMEOUT_MS / 1000);
 const MIN_LIMIT = 6;
 const MAX_LIMIT = 24;
-const DEFAULT_LIMIT = 12;
+// 12 was timing out cold-start; 6 typically finishes in ~10-14s and is plenty
+// for a browse grid (user can paginate if they want more).
+const DEFAULT_LIMIT = 6;
 
 exports.handler = async function (event) {
     const isPro = isProRequest(event);

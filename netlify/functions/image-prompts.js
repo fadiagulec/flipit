@@ -159,11 +159,17 @@ exports.handler = async function (event) {
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
-                max_tokens: 2000,
+                // 2000 was truncating the JSON closing braces, which made the
+                // parser fall through and dump raw text as a single "📸
+                // Generated prompts" blob. 4000 gives 5 detailed prompts
+                // (~700 output tokens each) room to breathe.
+                max_tokens: 4000,
                 system: systemPrompt,
                 messages: [{ role: 'user', content: userPrompt }]
             }),
-            signal: AbortSignal.timeout(60000)
+            // Stay under Netlify's 26s function cap (netlify.toml). Claude
+            // delivers in ~12-18s for 5 prompts with a warm function.
+            signal: AbortSignal.timeout(24000)
         });
 
         const data = await resp.json();
@@ -216,13 +222,21 @@ exports.handler = async function (event) {
             if (match) prompts = tryParse(match[0]);
         }
 
-        // Final fallback: hand back raw text as a single prompt
+        // Hard fail if we genuinely couldn't parse — better to surface a
+        // real retry error than dump a single truncated blob and pretend it
+        // is a usable prompt. The previous silent fallback was masking the
+        // max_tokens=2000 truncation bug.
         if (!prompts || prompts.length === 0) {
-            prompts = [{ label: '📸 Generated prompts', prompt: text }];
-        } else {
-            // Trim/pad to exactly `count`
-            prompts = prompts.slice(0, count);
+            console.error('Image-prompts parse failed; raw text (first 300):', text.slice(0, 300));
+            return {
+                statusCode: 502,
+                headers,
+                body: JSON.stringify({ error: 'Image prompt generation failed. Please try again.' })
+            };
         }
+
+        // Trim to exactly `count`
+        prompts = prompts.slice(0, count);
 
         return {
             statusCode: 200,
