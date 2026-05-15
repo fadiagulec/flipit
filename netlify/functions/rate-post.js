@@ -133,7 +133,16 @@ exports.handler = async function (event) {
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
                 max_tokens: 1500,
-                system: systemPrompt,
+                // Cache the large system prompt so repeat rate-post calls
+                // from the same user within ~5 min hit Anthropic's ephemeral
+                // cache → ~75% input-token discount on subsequent ratings.
+                system: [
+                    {
+                        type: 'text',
+                        text: systemPrompt,
+                        cache_control: { type: 'ephemeral' }
+                    }
+                ],
                 messages: [{ role: 'user', content: userParts.join('\n') }]
             }),
             signal: AbortSignal.timeout(45000)

@@ -113,14 +113,42 @@ function renderTrialBanner() {
     const banner = document.createElement('div');
     banner.id = 'flipit-trial-banner';
     banner.style.cssText = 'background:linear-gradient(135deg,#fff8e1,#fff3c4);border-bottom:1px solid #e8c840;padding:10px 16px;text-align:center;font-size:14px;color:#5a4a00;line-height:1.4;';
-    const cta = ' <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" target="_blank" rel="noopener" style="color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;">Lock in $37 lifetime \u2192</a>';
+
+    const strongEl = document.createElement('strong');
+    const numSpan = document.createElement('span');
+
     if (state.isWithinTrial) {
         const d = state.daysRemainingInTrial;
-        banner.innerHTML = `\u{1F381} <strong>Free trial active</strong> \u2014 ${d} day${d === 1 ? '' : 's'} left of unlimited access.${cta}`;
+        strongEl.textContent = 'Free trial active';
+        numSpan.textContent = String(d);
+        banner.append(
+            '\u{1F381} ',
+            strongEl,
+            ' \u2014 ',
+            numSpan,
+            ` day${d === 1 ? '' : 's'} left of unlimited access. `
+        );
     } else {
         const remaining = Math.max(0, state.dailyLimit - state.dailyCount);
-        banner.innerHTML = `\u{1F4CA} <strong>Free tier:</strong> ${remaining} of ${state.dailyLimit} flip${state.dailyLimit === 1 ? '' : 's'} left today.${cta}`;
+        strongEl.textContent = 'Free tier:';
+        numSpan.textContent = `${remaining} of ${state.dailyLimit}`;
+        banner.append(
+            '\u{1F4CA} ',
+            strongEl,
+            ' ',
+            numSpan,
+            ` flip${state.dailyLimit === 1 ? '' : 's'} left today. `
+        );
     }
+
+    const ctaLink = document.createElement('a');
+    ctaLink.href = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
+    ctaLink.target = '_blank';
+    ctaLink.rel = 'noopener';
+    ctaLink.style.cssText = 'color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;';
+    ctaLink.textContent = 'Lock in $37 lifetime \u2192';
+    banner.appendChild(ctaLink);
+
     document.body.insertBefore(banner, document.body.firstChild);
 }
 
@@ -663,19 +691,31 @@ function appendRateButton(container, payload) {
             });
             if (resp.status === 429) {
                 const data = await resp.json().catch(() => ({}));
-                cardHolder.innerHTML = `<div style="background:#fff3cd;border:1px solid #ffc107;padding:14px;border-radius:10px;color:#664d03;">${data.message || 'You’ve hit today’s rate limit.'}</div>`;
+                const warn = document.createElement('div');
+                warn.style.cssText = 'background:#fff3cd;border:1px solid #ffc107;padding:14px;border-radius:10px;color:#664d03;';
+                warn.textContent = data.message || 'You’ve hit today’s rate limit.';
+                cardHolder.innerHTML = '';
+                cardHolder.appendChild(warn);
                 return;
             }
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                cardHolder.innerHTML = `<div style="background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;">${data.error || 'Rating failed. Try again.'}</div>`;
+                const errBox = document.createElement('div');
+                errBox.style.cssText = 'background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;';
+                errBox.textContent = data.error || 'Rating failed. Try again.';
+                cardHolder.innerHTML = '';
+                cardHolder.appendChild(errBox);
                 return;
             }
             const rating = await resp.json();
             renderRatingCard(cardHolder, rating);
         } catch (err) {
             console.error('rate-post error', err);
-            cardHolder.innerHTML = '<div style="background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;">Couldn’t reach the rater. Check your connection and try again.</div>';
+            const errBox = document.createElement('div');
+            errBox.style.cssText = 'background:#f8d7da;border:1px solid #f5c2c7;padding:14px;border-radius:10px;color:#842029;';
+            errBox.textContent = 'Couldn’t reach the rater. Check your connection and try again.';
+            cardHolder.innerHTML = '';
+            cardHolder.appendChild(errBox);
         } finally {
             rateBtn.disabled = false;
             rateBtn.style.opacity = '1';
@@ -1580,7 +1620,7 @@ function showSuccess(msg, id) {
             const capText = rawCap.length > 120 ? rawCap.slice(0, 120) + '…' : rawCap;
             const cap = document.createElement('p');
             cap.style.cssText = 'color:#444;font-size:14px;line-height:1.4;margin:0;';
-            cap.innerHTML = escapeHtml(capText || '(no caption)');
+            cap.textContent = capText || '(no caption)';
             padded.appendChild(cap);
 
             // Engagement
