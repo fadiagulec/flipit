@@ -9,8 +9,17 @@ const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = async function (event) {
     const isPro = isProRequest(event);
+    // CORS allowlist — matches rate-post.js / extract-and-twist.js /
+    // instagram-browse.js. PR #38 moved every AI endpoint off the wildcard
+    // '*'; the parallelization rewrite in PR #42 accidentally regressed
+    // this back to '*'. Restoring the allowlist closes the cross-origin
+    // quota-burn vector.
+    const allowedOrigins = ['https://flipit-app.netlify.app'];
+    const origin = event.headers?.origin || '';
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Content-Type': 'application/json'
