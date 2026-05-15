@@ -164,7 +164,16 @@ exports.handler = async function (event) {
                 // Generated prompts" blob. 4000 gives 5 detailed prompts
                 // (~700 output tokens each) room to breathe.
                 max_tokens: 4000,
-                system: systemPrompt,
+                // Cache the large system prompt so subsequent flips within
+                // ~5 min hit Anthropic's ephemeral cache → ~75% input-token
+                // discount on repeat calls.
+                system: [
+                    {
+                        type: 'text',
+                        text: systemPrompt,
+                        cache_control: { type: 'ephemeral' }
+                    }
+                ],
                 messages: [{ role: 'user', content: userPrompt }]
             }),
             // Stay under Netlify's 26s function cap (netlify.toml). Claude

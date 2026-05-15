@@ -88,10 +88,16 @@ exports.handler = async function (event) {
 
     // ── Call Apify ──
     try {
-        const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?token=' + encodeURIComponent(apifyToken) + '&timeout=' + APIFY_TIMEOUT_SEC;
+        // Token is passed via the Authorization header rather than the URL
+        // so it can't land in upstream/proxy access logs. A wrong/expired
+        // token still surfaces as a 401 from Apify, handled below.
+        const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=' + APIFY_TIMEOUT_SEC;
         const apifyResp = await fetch(apifyUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + apifyToken
+            },
             body: JSON.stringify({
                 directUrls,
                 resultsType: 'posts',
@@ -151,6 +157,13 @@ function detectQueryType(raw) {
     if (/^https?:\/\//i.test(q)) {
         try {
             const u = new URL(q);
+            if (u.username || u.password) {
+                // URLs with embedded basic-auth creds (https://www.instagram.com@evil.com/)
+                // are a classic SSRF / open-redirect smuggling vector — reject
+                // BEFORE the hostname allowlist check so the credentials in
+                // the URL don't get a chance to confuse the parser.
+                return null;
+            }
             if (!/(?:^|\.)(instagram\.com|instagr\.am)$/i.test(u.hostname)) return null;
             return { kind: 'url', value: u.toString() };
         } catch { return null; }

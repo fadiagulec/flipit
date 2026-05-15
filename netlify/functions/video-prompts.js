@@ -127,10 +127,20 @@ exports.handler = async function (event) {
                     'x-api-key': apiKey,
                     'anthropic-version': '2023-06-01'
                 },
+                // Cache the system prompt so the 2nd and 3rd parallel calls
+                // in this Promise.all hit cache → ~75% input-token discount
+                // and faster responses. Anthropic's ephemeral cache TTL is
+                // ~5 min, so subsequent flips by the same user also benefit.
                 body: JSON.stringify({
                     model: 'claude-sonnet-4-6',
                     max_tokens: 800,
-                    system: systemPrompt,
+                    system: [
+                        {
+                            type: 'text',
+                            text: systemPrompt,
+                            cache_control: { type: 'ephemeral' }
+                        }
+                    ],
                     messages: [{ role: 'user', content: buildUserPrompt(spec) }]
                 }),
                 signal: AbortSignal.timeout(24000)
