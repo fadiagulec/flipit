@@ -649,6 +649,7 @@ function displayResults(data, platform) {
             hook: data.prompt || '',
             platform: platform || ''
         });
+        appendRestartButton(container);
     }
 }
 
@@ -811,6 +812,63 @@ function escapeHtml(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+// ── 🔄 NEW FLIP / RESTART ────────────────────────────────
+// Appears at the bottom of every results card. One click clears the
+// results, the URL input, and any carousel state, then scrolls back to
+// the URL input so the user can paste a new link without manually
+// clearing anything. Works from any tab — switches to URL Extract by
+// default since that is the most common entry point.
+function appendRestartButton(container) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:24px;padding-top:20px;border-top:1px dashed #ddd;display:flex;flex-direction:column;align-items:center;gap:8px;';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-tertiary';
+    btn.style.cssText = 'background:#fff;color:#0d6e66;border:2px solid #0d6e66;padding:12px 28px;font-weight:700;border-radius:10px;cursor:pointer;font-size:15px;display:inline-flex;align-items:center;gap:8px;';
+    btn.textContent = '\u{1F504} New Flip';
+
+    const hint = document.createElement('span');
+    hint.textContent = 'Clear this result and start a fresh flip.';
+    hint.style.cssText = 'font-size:12px;color:#888;';
+
+    btn.addEventListener('click', () => {
+        // Clear all globals that earlier flows may have populated
+        window._lastCarouselUrls = [];
+        window._lastCarouselCount = 0;
+
+        // Clear the main results container
+        const resultsContainer = document.getElementById('resultsContainer');
+        if (resultsContainer) resultsContainer.innerHTML = '';
+
+        // Clear the URL input + any platform badge / error caption
+        const urlInput = document.getElementById('urlInput');
+        if (urlInput) {
+            urlInput.value = '';
+            urlInput.dispatchEvent(new Event('input'));
+        }
+        const platformBadge = document.getElementById('platformBadge');
+        if (platformBadge) platformBadge.innerHTML = '';
+        const errorMessage = document.getElementById('errorMessage');
+        if (errorMessage) errorMessage.innerHTML = '';
+
+        // Switch back to URL Extract so the user lands ready to paste
+        if (typeof switchTab === 'function') switchTab('url-tab');
+
+        // Scroll the URL input into view, give focus
+        setTimeout(() => {
+            if (urlInput) {
+                urlInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                urlInput.focus({ preventScroll: true });
+            }
+        }, 80);
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(hint);
+    container.appendChild(wrap);
 }
 
 // ── SHAREABLE FLIP URL ────────────────────────────────────
