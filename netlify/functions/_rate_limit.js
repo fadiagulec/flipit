@@ -137,10 +137,54 @@ function getStoreSafe() {
     const factory = loadBlobs();
     if (!factory) return null;
     try {
+        // Try ambient context first (works when Netlify Functions runtime
+        // auto-injects NETLIFY_BLOBS_CONTEXT).
         return factory(STORE_NAME);
     } catch (err) {
-        console.warn('[rate_limit] getStore failed, fail-open:', err && err.message);
+        // Ambient context missing — try explicit siteID + token. This works
+        // if the user has set NETLIFY_SITE_ID + NETLIFY_BLOBS_TOKEN as
+        // function env vars (one-time setup; see _rate_limit.js header).
+        const siteID = process.env.NETLIFY_SITE_ID;
+        const token = process.env.NETLIFY_BLOBS_TOKEN || process.env.NETLIFY_AUTH_TOKEN;
+        if (siteID && token) {
+            try {
+                return factory({ name: STORE_NAME, siteID, token, consistency: 'eventual' });
+            } catch (err2) {
+                console.warn('[rate_limit] explicit-creds getStore also failed:', err2 && err2.message);
+            }
+        }
+        console.warn('[rate_limit] getStore failed, falling back to in-memory:', err && err.message);
         return null;
+    }
+}
+
+// ── In-memory fallback store (per warm Lambda instance) ──────────────────
+// When Netlify Blobs is unavailable, we maintain a simple Map keyed by
+// `ai:{ipHash}:{day}` to enforce limits within a single warm instance.
+// This isn't durable across instances or cold starts, but it stops the
+// "anyone can spam thousands of free flips" worst case. The Anthropic
+// account-level rate limit acts as a backstop for distributed abuse.
+const _memCounts = new Map(); // key → { count, expiresAt }
+
+function memRead(key) {
+    const e = _memCounts.get(key);
+    if (!e) return 0;
+    if (Date.now() > e.expiresAt) {
+        _memCounts.delete(key);
+        return 0;
+    }
+    return e.count;
+}
+
+function memWrite(key, count, ttlSec) {
+    _memCounts.set(key, { count, expiresAt: Date.now() + ttlSec * 1000 });
+    // Cheap GC: prune up to 100 expired entries per write to keep memory bounded.
+    if (_memCounts.size > 1000) {
+        let pruned = 0;
+        const now = Date.now();
+        for (const [k, v] of _memCounts) {
+            if (now > v.expiresAt) { _memCounts.delete(k); if (++pruned > 100) break; }
+        }
     }
 }
 
@@ -150,24 +194,19 @@ async function enforceAiQuota(event, isPro) {
     const store = getStoreSafe();
     const ipHash = hashIp(getClientIp(event));
     const t = nowParts();
-
-    // Fail-open if Blobs is unavailable
-    if (!store) {
-        return {
-            allowed: true,
-            limit: isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT,
-            remaining: isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT,
-            scope: 'day',
-            proCapHit: null,
-            degraded: true
-        };
-    }
-
     const dayKey   = `ai:${ipHash}:${t.day}`;
     const monthKey = `ai:${ipHash}:${t.month}`;
 
+    // Pick storage backend: prefer Blobs (cross-instance, persistent), fall
+    // back to in-memory (per-warm-instance) when Blobs is unavailable.
+    const readKey = async (k) => store ? await readCount(store, k) : memRead(k);
+    const writeKey = async (k, c, ttl) => {
+        if (store) await writeCount(store, k, c);
+        else memWrite(k, c, ttl);
+    };
+
     if (!isPro) {
-        const dayCount = await readCount(store, dayKey);
+        const dayCount = await readKey(dayKey);
         if (dayCount >= FREE_DAILY_LIMIT) {
             return {
                 allowed: false,
@@ -179,20 +218,21 @@ async function enforceAiQuota(event, isPro) {
             };
         }
         const newCount = dayCount + 1;
-        await writeCount(store, dayKey, newCount);
+        await writeKey(dayKey, newCount, secondsTillMidnightUtc());
         return {
             allowed: true,
             limit: FREE_DAILY_LIMIT,
             remaining: Math.max(0, FREE_DAILY_LIMIT - newCount),
             scope: 'day',
-            proCapHit: null
+            proCapHit: null,
+            degraded: !store
         };
     }
 
     // Pro path: enforce both daily and monthly caps
     const [dayCount, monthCount] = await Promise.all([
-        readCount(store, dayKey),
-        readCount(store, monthKey)
+        readKey(dayKey),
+        readKey(monthKey)
     ]);
 
     if (dayCount >= PRO_DAILY_LIMIT) {
@@ -219,8 +259,8 @@ async function enforceAiQuota(event, isPro) {
     const newDay = dayCount + 1;
     const newMonth = monthCount + 1;
     await Promise.all([
-        writeCount(store, dayKey, newDay),
-        writeCount(store, monthKey, newMonth)
+        writeKey(dayKey, newDay, secondsTillMidnightUtc()),
+        writeKey(monthKey, newMonth, secondsTillEndOfMonthUtc())
     ]);
 
     return {
@@ -228,7 +268,8 @@ async function enforceAiQuota(event, isPro) {
         limit: PRO_DAILY_LIMIT,
         remaining: Math.max(0, PRO_DAILY_LIMIT - newDay),
         scope: 'day',
-        proCapHit: null
+        proCapHit: null,
+        degraded: !store
     };
 }
 
@@ -238,20 +279,15 @@ async function enforceTokenIssueQuota(event) {
     const store = getStoreSafe();
     const ipHash = hashIp(getClientIp(event));
     const t = nowParts();
-
-    if (!store) {
-        return {
-            allowed: true,
-            limit: TOKEN_PER_MIN_LIMIT,
-            remaining: TOKEN_PER_MIN_LIMIT,
-            scope: 'minute',
-            proCapHit: null,
-            degraded: true
-        };
-    }
-
     const key = `token:${ipHash}:${t.minute}`;
-    const count = await readCount(store, key);
+
+    const readKey = async (k) => store ? await readCount(store, k) : memRead(k);
+    const writeKey = async (k, c, ttl) => {
+        if (store) await writeCount(store, k, c);
+        else memWrite(k, c, ttl);
+    };
+
+    const count = await readKey(key);
 
     if (count >= TOKEN_PER_MIN_LIMIT) {
         return {
@@ -265,14 +301,15 @@ async function enforceTokenIssueQuota(event) {
     }
 
     const newCount = count + 1;
-    await writeCount(store, key, newCount);
+    await writeKey(key, newCount, secondsTillNextMinute());
 
     return {
         allowed: true,
         limit: TOKEN_PER_MIN_LIMIT,
         remaining: Math.max(0, TOKEN_PER_MIN_LIMIT - newCount),
         scope: 'minute',
-        proCapHit: null
+        proCapHit: null,
+        degraded: !store
     };
 }
 
