@@ -38,7 +38,7 @@ include the session ID so we can verify the payment was real.
 Under **After payment** → **Show a confirmation page** → **Custom URL**:
 
 ```
-https://flipit-app.netlify.app/thank-you.html?session_id={CHECKOUT_SESSION_ID}
+https://flipit.earnwith-ai.com/thank-you.html?session_id={CHECKOUT_SESSION_ID}
 ```
 
 The `{CHECKOUT_SESSION_ID}` is a literal Stripe template — Stripe replaces
@@ -51,7 +51,7 @@ After setting the env vars, **redeploy** so the functions pick them up:
 
 ## 4. (Optional) Test the full flow
 
-1. Open https://flipit-app.netlify.app/thank-you.html (no `?session_id=`)
+1. Open https://flipit.earnwith-ai.com/thank-you.html (no `?session_id=`)
    → Should see "⚠️ Pro access could not be activated automatically"
    → No `flipit_pro` token set in localStorage
 2. Make a real test purchase via Stripe (use test mode + 4242 card if in

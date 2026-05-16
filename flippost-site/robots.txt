@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://flipit-app.netlify.app/sitemap.xml
+Sitemap: https://flipit.earnwith-ai.com/sitemap.xml

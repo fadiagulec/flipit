@@ -39,5 +39,5 @@ Before publishing:
 Instagram on iOS/Android doesn't support browser extensions. Use this bookmarklet instead — save it as a bookmark, tap it while viewing any post:
 
 ```javascript
-javascript:(function(){window.open('https://flipit-app.netlify.app/?url='+encodeURIComponent(location.href),'_blank');})();
+javascript:(function(){window.open('https://flipit.earnwith-ai.com/?url='+encodeURIComponent(location.href),'_blank');})();
 ```

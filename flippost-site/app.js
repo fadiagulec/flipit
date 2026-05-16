@@ -1813,7 +1813,7 @@ function showSuccess(msg, id) {
 // Honors ?url= or ?u= in the page URL so the Chrome extension /
 // bookmarklet / share buttons / any external referrer can deep-link
 // directly into a flip. Example:
-//   https://flipit-app.netlify.app/?url=https%3A%2F%2Finstagram.com%2Fp%2FXYZ
+//   https://flipit.earnwith-ai.com/?url=https%3A%2F%2Finstagram.com%2Fp%2FXYZ
 // Validates the inbound URL (must be http(s) and on a known social
 // platform) before auto-clicking Extract — prevents abuse where a
 // random page redirects users into running flips on attacker URLs.

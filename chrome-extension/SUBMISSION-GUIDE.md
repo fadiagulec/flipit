@@ -6,7 +6,7 @@ End-to-end walkthrough for getting FlipIt onto the Chrome Web Store. Allow ~45 m
 
 ## 0. Pre-flight (one-time, before you open the dev console)
 
-- [ ] **Deploy `flippost-site/privacy.html` to Netlify.** Push and wait for the deploy to finish, then load https://flipit-app.netlify.app/privacy.html in a regular Chrome window. Confirm it loads with no 404. Chrome's automated review WILL hit this URL and reject if it 404s.
+- [ ] **Deploy `flippost-site/privacy.html` to Netlify.** Push and wait for the deploy to finish, then load https://flipit.earnwith-ai.com/privacy.html in a regular Chrome window. Confirm it loads with no 404. Chrome's automated review WILL hit this URL and reject if it 404s.
 - [ ] **Confirm `flipit-extension-v1.0.0.zip` exists in the repo root** (created by the build step — see "Build the zip" below if you need to regenerate).
 - [ ] **Decide on a support email.** Chrome requires a public support email on the listing. Use a forwarding alias if you don't want to publish your personal address. Update the `TODO` in `store-listing.md` → "Support email" before you start.
 - [ ] **Take screenshots** (see "Screenshots" section below — you can't submit without at least 1).
@@ -84,7 +84,7 @@ This is the section that rejects the most extensions. Be thorough.
 4. **Are you using remote code?** → **No**. (All JS is in the bundle.)
 5. **Data usage** — answer all "Does the extension collect…" checkboxes per the table in `store-listing.md` → "Data usage disclosures". Every answer is **No**.
 6. **Certifications** — tick all three boxes at the bottom (no selling user data, no unrelated use, no creditworthiness).
-7. **Privacy policy URL** — paste `https://flipit-app.netlify.app/privacy.html`.
+7. **Privacy policy URL** — paste `https://flipit.earnwith-ai.com/privacy.html`.
 
 ---
 

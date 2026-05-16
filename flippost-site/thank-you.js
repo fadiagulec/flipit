@@ -106,7 +106,7 @@
 (function wireAffiliateCopy() {
     var btn = document.getElementById('flipit-copy-affiliate');
     if (!btn) return;
-    var url = 'https://flipit-app.netlify.app/flipit-landing-page.html';
+    var url = 'https://flipit.earnwith-ai.com/flipit-landing-page.html';
     btn.addEventListener('click', function () {
         function done(label) { btn.textContent = label; setTimeout(function () { btn.textContent = 'Copy'; }, 2000); }
         if (navigator.clipboard && navigator.clipboard.writeText) {

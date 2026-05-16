@@ -28,7 +28,7 @@ const DEFAULT_LIMIT = 6;
 
 exports.handler = async function (event) {
     const isPro = isProRequest(event);
-    const allowedOrigins = ['https://flipit-app.netlify.app'];
+    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
     const origin = event.headers?.origin || '';
     const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
 
