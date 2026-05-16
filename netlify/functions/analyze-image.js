@@ -59,16 +59,22 @@ exports.handler = async (event) => {
     // Surface user-actionable errors (size, fetch, claude) so the UI can guide them.
     const msg = err && err.message ? err.message : '';
     let userMsg = 'Image analysis failed. Please try again.';
-    if (/blocked url|invalid url|only http|dns lookup/i.test(msg)) userMsg = 'That image URL is not allowed.';
-    else if (/too large/i.test(msg)) userMsg = msg;
-    else if (/request too large|over.{0,5}limit/i.test(msg)) userMsg = 'Image too large for Claude — try a smaller post.';
-    else if (/rate.?limit/i.test(msg)) userMsg = 'Hit the AI rate limit — wait 60 seconds and try again.';
-    else if (/can't generate a recreate prompt/i.test(msg)) userMsg = msg;
-    else if (/Claude API/i.test(msg)) userMsg = 'AI service error: ' + msg.slice(0, 120);
-    else if (/Image fetch HTTP/i.test(msg)) userMsg = 'Could not fetch this image (the source may be private or expired).';
-    else if (/empty body/i.test(msg)) userMsg = 'The image source returned empty data.';
+    // Status-code routing: client errors → 4xx, upstream/server errors → 5xx.
+    // SSRF/invalid-URL is the user's fault (bad input), not a server crash.
+    let statusCode = 500;
+    if (/blocked url|invalid url|only http|dns lookup/i.test(msg)) {
+      userMsg = 'That image URL is not allowed.';
+      statusCode = 400;
+    }
+    else if (/too large/i.test(msg)) { userMsg = msg; statusCode = 413; }
+    else if (/request too large|over.{0,5}limit/i.test(msg)) { userMsg = 'Image too large for Claude — try a smaller post.'; statusCode = 413; }
+    else if (/rate.?limit/i.test(msg)) { userMsg = 'Hit the AI rate limit — wait 60 seconds and try again.'; statusCode = 429; }
+    else if (/can't generate a recreate prompt/i.test(msg)) { userMsg = msg; statusCode = 422; }
+    else if (/Claude API/i.test(msg)) { userMsg = 'AI service error: ' + msg.slice(0, 120); statusCode = 502; }
+    else if (/Image fetch HTTP/i.test(msg)) { userMsg = 'Could not fetch this image (the source may be private or expired).'; statusCode = 502; }
+    else if (/empty body/i.test(msg)) { userMsg = 'The image source returned empty data.'; statusCode = 502; }
     return {
-      statusCode: 500,
+      statusCode,
       headers,
       body: JSON.stringify({ error: userMsg })
     };

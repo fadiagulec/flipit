@@ -27,8 +27,14 @@ const TOKEN_PREFIX = 'flpt.';
 const TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
 
 exports.handler = async function (event) {
+    // CORS allowlist matching every other AI endpoint. Keeps the netlify.app
+    // origin during the domain-migration window; remove after 30 days.
+    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
+    const origin = event.headers?.origin || '';
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Content-Type': 'application/json'

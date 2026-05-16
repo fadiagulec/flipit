@@ -1,0 +1,25 @@
+{
+  "name": "flipit",
+  "version": "1.0.0",
+  "description": "FlipIt - See It. Flip It. Post It. Go Viral.\r Extract viral scripts and AI-generated prompts from any social media post (Instagram, TikTok, YouTube, LinkedIn, Facebook, X, Threads). Download videos, images, and carousels watermark-free.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fadiagulec/flipit.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "@netlify/functions": "^2.8.0"
+  },
+  "bugs": {
+    "url": "https://github.com/fadiagulec/flipit/issues"
+  },
+  "homepage": "https://github.com/fadiagulec/flipit#readme"
+}

@@ -13,9 +13,10 @@ flipit-extension-*.zip
 # Local audit scratch (not source-of-truth)
 AUDIT.md
 
-# Playwright / npm bits used locally to capture store screenshots
-package.json
-package-lock.json
+# NOTE: package.json and package-lock.json ARE tracked now — they declare
+# @netlify/blobs and @netlify/functions at the project root so Netlify's
+# `npm install` actually pulls them in. Without these, the rate limiter
+# fail-opens in production (see _rate_limit.js loadBlobs() catch path).
 
 # Chrome Web Store submission scratch (regenerated locally)
 submission-assets/
