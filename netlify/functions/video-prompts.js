@@ -14,7 +14,7 @@ exports.handler = async function (event) {
     // '*'; the parallelization rewrite in PR #42 accidentally regressed
     // this back to '*'. Restoring the allowlist closes the cross-origin
     // quota-burn vector.
-    const allowedOrigins = ['https://flipit-app.netlify.app'];
+    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
     const origin = event.headers?.origin || '';
     const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
 
