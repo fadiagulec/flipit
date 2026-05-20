@@ -1615,7 +1615,7 @@ function showSuccess(msg, id) {
         if (!posts || posts.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'result-section';
-            empty.innerHTML = '<h3>🔍 No posts found</h3><p class="result-text">No posts found. Try a different username or hashtag.</p>';
+            empty.innerHTML = '<h3>🔍 No posts found</h3><p class="result-text">No posts found. Try a different name, @handle, or #hashtag.</p>';
             container.appendChild(empty);
             return;
         }
@@ -1765,7 +1765,7 @@ function showSuccess(msg, id) {
     btn.addEventListener('click', async () => {
         const query = (queryInput && queryInput.value.trim()) || '';
         if (!query) {
-            showError('Enter a @username, #hashtag, or Instagram post URL.', 'instagramErrorMessage');
+            showError('Enter a creator name, @handle, #hashtag, or Instagram post URL.', 'instagramErrorMessage');
             return;
         }
         if (!gateOrPaywall()) return;

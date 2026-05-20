@@ -64,10 +64,10 @@ exports.handler = async function (event) {
     if (!Number.isFinite(limit)) limit = DEFAULT_LIMIT;
     limit = Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, limit));
 
-    // ── Detect query type → build Apify directUrls ──
+    // ── Detect query type → build Apify request ──
     const queryType = detectQueryType(rawQuery);
     if (!queryType) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unrecognized query. Use @creatorname, #hashtag, or an Instagram URL.' }) };
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unrecognized query. Try @creatorname, #hashtag, an Instagram URL, or a creator name.' }) };
     }
 
     const apifyToken = process.env.APIFY_TOKEN;
@@ -75,15 +75,47 @@ exports.handler = async function (event) {
         return { statusCode: 503, headers, body: JSON.stringify({ error: 'Browse temporarily unavailable. Please try again later.' }) };
     }
 
-    let directUrls;
-    let resultsLimit = limit;
+    // Build the Apify request body. Three modes:
+    //  - directUrls path (username / hashtag / url): we know the exact IG
+    //    URL(s) to scrape, Apify pulls posts directly.
+    //  - search path (name): we let Apify search Instagram for users matching
+    //    the name, take the top match, and return their recent posts. Lets
+    //    users type "Kylie Jenner" instead of guessing the @handle.
+    let apifyBody;
     if (queryType.kind === 'username') {
-        directUrls = ['https://www.instagram.com/' + queryType.value + '/'];
+        apifyBody = {
+            directUrls: ['https://www.instagram.com/' + queryType.value + '/'],
+            resultsType: 'posts',
+            resultsLimit: limit,
+            addParentData: false,
+            enhanceUserSearchWithFacebookPage: false
+        };
     } else if (queryType.kind === 'hashtag') {
-        directUrls = ['https://www.instagram.com/explore/tags/' + queryType.value + '/'];
-    } else { // 'url'
-        directUrls = [queryType.value];
-        resultsLimit = 1;
+        apifyBody = {
+            directUrls: ['https://www.instagram.com/explore/tags/' + queryType.value + '/'],
+            resultsType: 'posts',
+            resultsLimit: limit,
+            addParentData: false,
+            enhanceUserSearchWithFacebookPage: false
+        };
+    } else if (queryType.kind === 'url') {
+        apifyBody = {
+            directUrls: [queryType.value],
+            resultsType: 'posts',
+            resultsLimit: 1,
+            addParentData: false,
+            enhanceUserSearchWithFacebookPage: false
+        };
+    } else { // 'search' — free-text name lookup
+        apifyBody = {
+            search: queryType.value,
+            searchType: 'user',
+            searchLimit: 1,            // take the top matching user
+            resultsType: 'posts',      // and return their recent posts
+            resultsLimit: limit,
+            addParentData: false,
+            enhanceUserSearchWithFacebookPage: false
+        };
     }
 
     // ── Call Apify ──
@@ -98,13 +130,7 @@ exports.handler = async function (event) {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + apifyToken
             },
-            body: JSON.stringify({
-                directUrls,
-                resultsType: 'posts',
-                resultsLimit,
-                addParentData: false,
-                enhanceUserSearchWithFacebookPage: false
-            }),
+            body: JSON.stringify(apifyBody),
             signal: AbortSignal.timeout(APIFY_TIMEOUT_MS)
         });
 
@@ -148,7 +174,7 @@ exports.handler = async function (event) {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-// Returns { kind: 'username'|'hashtag'|'url', value: string } or null.
+// Returns { kind: 'username'|'hashtag'|'url'|'search', value: string } or null.
 function detectQueryType(raw) {
     const q = raw.trim();
     if (!q) return null;
@@ -176,19 +202,28 @@ function detectQueryType(raw) {
         return { kind: 'hashtag', value: tag };
     }
 
-    // Username form: leading @ (preferred) or bare alphanumeric+._
+    // Username form: explicit leading @ → always treat as handle
     if (q.startsWith('@')) {
         const user = q.slice(1).replace(/[^A-Za-z0-9._]/g, '').slice(0, 100);
         if (!user) return null;
         return { kind: 'username', value: user };
     }
 
-    // Bare token — heuristic: if it looks like an IG username/handle, treat as username
-    if (/^[A-Za-z0-9._]{1,100}$/.test(q)) {
+    // Bare alphanumeric+._ that looks like a valid IG handle (no spaces, valid
+    // username chars, 3-30 chars) → username. Keeps the existing "type the
+    // handle without @" flow working.
+    if (/^[A-Za-z0-9._]{3,30}$/.test(q)) {
         return { kind: 'username', value: q };
     }
 
-    return null;
+    // Anything else (names with spaces like "Kylie Jenner", emoji-heavy
+    // queries, or partial brand names like "Nike running") → treat as a
+    // free-text search. Apify will do an IG user-search and return posts
+    // from the top match. Strip pathological characters to keep the
+    // Apify payload clean.
+    const search = q.replace(/[<>"'\\`]/g, '').slice(0, 200).trim();
+    if (search.length < 2) return null;
+    return { kind: 'search', value: search };
 }
 
 function normalizeApifyPost(item) {
