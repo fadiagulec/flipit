@@ -116,6 +116,95 @@ exports.handler = async function (event) {
             'Output as JSON ONLY, no preamble, no markdown fences:',
             '{"prompts": [{"label": "📸 Slide 1 — Hook / Cover", "prompt": "..."}, {"label": "💡 Slide 2 — The Problem", "prompt": "..."}, ...]}'
         ].join('\n');
+
+        // Parallel-call optimization: instead of ONE big Claude call that
+        // generates all N slides (which sometimes runs 24-26s and trips
+        // Netlify's function timeout), fan out to N parallel small calls.
+        // Each slide becomes ~600 tokens of output, runs in ~5-8s, and
+        // Promise.all gives us total wall-time = max(individual call) ≈ 8s.
+        const SLIDE_LABELS = [
+            '📸 Slide 1 — Hook / Cover',
+            '💡 Slide 2 — The Problem',
+            '✨ Slide 3 — The Insight',
+            '🎬 Slide 4 — The Action',
+            '🏆 Slide 5 — The Result',
+            '🔖 Slide 6 — Save This',
+            '🎨 Slide 7 — Behind The Scenes',
+            '🌅 Slide 8 — Lifestyle',
+            '💎 Slide 9 — Premium Detail',
+            '📌 Slide 10 — CTA'
+        ];
+
+        const buildSlideUserPrompt = (slideLabel, slideIndex, total) => [
+            `Generate ONE image prompt that ILLUSTRATES this exact script — specifically the ${slideLabel} slide (slide ${slideIndex + 1} of ${total}) of a social-media carousel:`,
+            '',
+            '<script>',
+            flippedScript,
+            '</script>',
+            '',
+            `Platform: ${platform}`,
+            '',
+            `This is the ${slideLabel} slide. Make the prompt SPECIFIC to what the script is LITERALLY about — read the words and depict those exact objects/people/places. Reference real moments from the script. No generic lifestyle phrases. NO money screenshots, DM threads, or income notifications unless the script literally says those.`,
+            '',
+            'Output ONE detailed prompt as a single line of plain text (no JSON, no markdown, no preamble). End with: --ar 4:5 --style raw --v 6.1'
+        ].join('\n');
+
+        async function generateOneSlide(slideLabel, slideIndex, total) {
+            try {
+                const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-sonnet-4-6',
+                        max_tokens: 800,
+                        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+                        messages: [{ role: 'user', content: buildSlideUserPrompt(slideLabel, slideIndex, total) }]
+                    }),
+                    signal: AbortSignal.timeout(22000)
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    console.error('Slide', slideIndex + 1, 'Claude error:', resp.status, data?.error?.message);
+                    return null;
+                }
+                const text = (data.content?.[0]?.text || '').trim();
+                if (!text) return null;
+                return { label: slideLabel, prompt: text };
+            } catch (err) {
+                console.error('Slide', slideIndex + 1, 'failed:', err?.message || err);
+                return null;
+            }
+        }
+
+        // Fan out N parallel calls
+        try {
+            const labels = SLIDE_LABELS.slice(0, count);
+            const results = await Promise.all(labels.map((lbl, idx) => generateOneSlide(lbl, idx, count)));
+            const successful = results.filter(Boolean);
+            if (successful.length === 0) {
+                return {
+                    statusCode: 502,
+                    headers,
+                    body: JSON.stringify({ error: 'Image prompt generation failed. Please try again.' })
+                };
+            }
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ prompts: successful })
+            };
+        } catch (err) {
+            console.error('image-prompts parallel error:', err?.message || err);
+            return {
+                statusCode: 500,
+                headers,
+                body: JSON.stringify({ error: 'Image prompt generation failed. Please try again.' })
+            };
+        }
     } else {
         const niche = String(body.niche).trim().slice(0, 200);
         const style = (typeof body.style === 'string' && body.style.trim())
