@@ -113,7 +113,9 @@ Example opener: "..."
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
                 max_tokens: 2000,
-                system: systemPrompt,
+                // Cache the large system prompt — ~75% input-token discount
+                // on repeat calls within 5min TTL.
+                system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
                 messages: [{ role: 'user', content: userPrompt }]
             }),
             signal: AbortSignal.timeout(60000)

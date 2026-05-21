@@ -3,3 +3,4 @@ flask-cors==4.0.0
 requests==2.31.0
 yt-dlp[default]>=2025.1.15
 curl-cffi>=0.7.0
+instaloader>=4.13
