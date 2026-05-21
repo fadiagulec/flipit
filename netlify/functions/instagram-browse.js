@@ -26,6 +26,12 @@ const MAX_LIMIT = 24;
 // for a browse grid (user can paginate if they want more).
 const DEFAULT_LIMIT = 6;
 
+// Railway/Instaloader hybrid: try the free Python scraper first, fall back
+// to Apify only when Railway returns 503 ("blocked") or errors. Cuts the
+// majority of browse traffic off the paid Apify actor.
+const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app';
+const RAILWAY_TIMEOUT_MS = 18000;
+
 exports.handler = async function (event) {
     const isPro = isProRequest(event);
     const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
@@ -116,6 +122,63 @@ exports.handler = async function (event) {
             addParentData: false,
             enhanceUserSearchWithFacebookPage: false
         };
+    }
+
+    // ── Railway/Instaloader first (free, fast when not blocked) ──
+    // On 503 { error: "blocked" } or any fetch error we fall through to
+    // the Apify path below. Empty-array responses are treated as valid
+    // "no results" — we don't burn an Apify run for those either.
+    try {
+        const qs = new URLSearchParams();
+        let railwayEndpoint = null;
+        if (queryType.kind === 'username') {
+            railwayEndpoint = 'posts';
+            qs.set('username', queryType.value);
+            qs.set('limit', String(limit));
+        } else if (queryType.kind === 'hashtag') {
+            railwayEndpoint = 'hashtag';
+            qs.set('tag', queryType.value);
+            qs.set('limit', String(limit));
+        } else if (queryType.kind === 'search') {
+            railwayEndpoint = 'search';
+            qs.set('q', queryType.value);
+            qs.set('limit', String(limit));
+        } else if (queryType.kind === 'url') {
+            railwayEndpoint = 'post';
+            qs.set('url', queryType.value);
+        }
+
+        if (railwayEndpoint) {
+            const railwayUrl = RAILWAY_URL + '/instagram/' + railwayEndpoint + '?' + qs.toString();
+            const r = await fetch(railwayUrl, { signal: AbortSignal.timeout(RAILWAY_TIMEOUT_MS) });
+            if (r.ok) {
+                const data = await r.json();
+                if (railwayEndpoint === 'post') {
+                    // Single-post shape → wrap into a posts[] for the browse caller.
+                    if (data && typeof data === 'object' && (data.displayUrl || data.images)) {
+                        const shortcodeMatch = queryType.value.match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
+                        const wrapped = {
+                            url: queryType.value,
+                            thumbnail: (typeof data.displayUrl === 'string' && data.displayUrl.startsWith('http')) ? data.displayUrl
+                                : (Array.isArray(data.images) && typeof data.images[0] === 'string' ? data.images[0] : null),
+                            caption: (typeof data.caption === 'string' ? data.caption : '').slice(0, 200),
+                            owner: data.ownerUsername ? '@' + String(data.ownerUsername).replace(/^@/, '') : '',
+                            likes: 0,
+                            comments: 0,
+                            isVideo: !!data.isVideo,
+                            isCarousel: Array.isArray(data.images) && data.images.length > 1
+                        };
+                        return { statusCode: 200, headers, body: JSON.stringify({ posts: [wrapped], source: 'railway' }) };
+                    }
+                } else if (Array.isArray(data.posts)) {
+                    // Both populated and empty arrays are valid answers; return without burning Apify.
+                    return { statusCode: 200, headers, body: JSON.stringify({ posts: data.posts, source: 'railway' }) };
+                }
+            }
+            // r.status === 503 (blocked) or anything else → fall through to Apify.
+        }
+    } catch (railwayErr) {
+        console.warn('[instagram-browse] Railway failed, falling back to Apify:', railwayErr && railwayErr.message);
     }
 
     // ── Call Apify ──

@@ -1,13 +1,239 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
-import subprocess, os, tempfile, base64, json, glob
+import subprocess, os, tempfile, base64, json, glob, time, threading, signal as _signal
+from urllib.parse import urlparse
+
+try:
+    import instaloader
+    from instaloader.exceptions import (
+        ConnectionException,
+        LoginRequiredException,
+        InvalidArgumentException,
+        QueryReturnedNotFoundException,
+        ProfileNotExistsException,
+    )
+    # IPSWatchdogException only exists on newer instaloader versions; fall
+    # back to a stub class so isinstance() checks don't blow up on older deps.
+    try:
+        from instaloader.exceptions import IPSWatchdogException  # type: ignore
+    except Exception:
+        class IPSWatchdogException(Exception):  # noqa: N818
+            pass
+    INSTALOADER_AVAILABLE = True
+except Exception as _e:  # pragma: no cover — instaloader missing locally
+    INSTALOADER_AVAILABLE = False
+    instaloader = None
+    ConnectionException = LoginRequiredException = InvalidArgumentException = Exception
+    QueryReturnedNotFoundException = ProfileNotExistsException = Exception
+    class IPSWatchdogException(Exception):  # noqa: N818
+        pass
 
 app = Flask(__name__)
 CORS(app)
 
+# ── Instaloader config ────────────────────────────────────────────────
+# Anonymous, metadata-only mode. We never log in (account-ban risk) and
+# never download media (we only need URLs/captions/counts).
+_LOADER = None
+_LOADER_LOCK = threading.Lock()
+
+def get_loader():
+    """Lazily build a shared anonymous Instaloader instance."""
+    global _LOADER
+    if not INSTALOADER_AVAILABLE:
+        return None
+    if _LOADER is None:
+        with _LOADER_LOCK:
+            if _LOADER is None:
+                _LOADER = instaloader.Instaloader(
+                    quiet=True,
+                    download_pictures=False,
+                    download_videos=False,
+                    download_video_thumbnails=False,
+                    download_geotags=False,
+                    download_comments=False,
+                    save_metadata=False,
+                    post_metadata_txt_pattern='',
+                    # One polite request delay between calls — Instaloader has
+                    # adaptive throttling; this just caps minimum spacing.
+                    request_timeout=15.0,
+                    max_connection_attempts=1,
+                )
+    return _LOADER
+
+# ── In-memory cache (30 min TTL) ──────────────────────────────────────
+# Railway processes are persistent so a plain dict survives across requests.
+# Key: ('posts'|'post'|'hashtag'|'search', identifier, limit). Value: (expires_at, payload).
+_CACHE = {}
+_CACHE_LOCK = threading.Lock()
+CACHE_TTL_SEC = 30 * 60
+
+def cache_get(key):
+    with _CACHE_LOCK:
+        entry = _CACHE.get(key)
+        if not entry:
+            return None
+        expires_at, payload = entry
+        if time.time() > expires_at:
+            _CACHE.pop(key, None)
+            return None
+        return payload
+
+def cache_set(key, payload):
+    with _CACHE_LOCK:
+        _CACHE[key] = (time.time() + CACHE_TTL_SEC, payload)
+        # Light bound: if cache balloons, drop oldest 25%.
+        if len(_CACHE) > 500:
+            stale = sorted(_CACHE.items(), key=lambda kv: kv[1][0])[:125]
+            for k, _ in stale:
+                _CACHE.pop(k, None)
+
+# ── Per-request 60s wall-clock guard ──────────────────────────────────
+# Instaloader can hang on auth challenges even with request_timeout set.
+# We stamp a deadline on g and check it inside the scrape loops, plus a
+# best-effort thread-based timeout wrapper for individual blocking calls.
+REQUEST_DEADLINE_SEC = 60
+
+@app.before_request
+def _stamp_deadline():
+    g.deadline = time.time() + REQUEST_DEADLINE_SEC
+
+def _deadline_exceeded():
+    return time.time() > getattr(g, 'deadline', float('inf'))
+
+def _run_with_timeout(fn, timeout_sec=15):
+    """Run fn() in a worker thread; return (ok, value_or_exc). On timeout
+    returns (False, TimeoutError(...)). The worker keeps running in the
+    background but we stop waiting — Instaloader requests will themselves
+    time out via request_timeout=15."""
+    result = {}
+
+    def _target():
+        try:
+            result['value'] = fn()
+        except BaseException as e:  # noqa: BLE001
+            result['error'] = e
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout_sec)
+    if t.is_alive():
+        return False, TimeoutError(f'Instaloader call exceeded {timeout_sec}s')
+    if 'error' in result:
+        return False, result['error']
+    return True, result.get('value')
+
+# ── Response shaping helpers ──────────────────────────────────────────
+def _post_to_browse_dict(post):
+    """Map an Instaloader Post → the shape instagram-browse.js expects.
+
+    Consumer (Netlify) wants:
+      { url, thumbnail, caption, owner, likes, comments, isVideo, isCarousel, postedAt? }
+    """
+    try:
+        shortcode = getattr(post, 'shortcode', None) or ''
+        url = f'https://www.instagram.com/p/{shortcode}/' if shortcode else None
+        if not url:
+            return None
+
+        thumbnail = getattr(post, 'url', None) or getattr(post, 'display_url', None)
+        # Some Instaloader builds expose display_resources; fall back to first.
+        if not thumbnail:
+            res = getattr(post, 'display_resources', None) or []
+            if res and isinstance(res, list):
+                thumbnail = res[0].get('src') if isinstance(res[0], dict) else None
+
+        caption = getattr(post, 'caption', None) or ''
+        if isinstance(caption, str):
+            caption = caption[:200]
+        else:
+            caption = ''
+
+        owner_username = getattr(post, 'owner_username', None) or ''
+        owner = f'@{owner_username}' if owner_username else ''
+
+        likes = int(getattr(post, 'likes', 0) or 0)
+        comments = int(getattr(post, 'comments', 0) or 0)
+
+        is_video = bool(getattr(post, 'is_video', False))
+        typename = getattr(post, 'typename', '') or ''
+        # GraphSidecar = carousel; mediacount > 1 also indicates carousel.
+        media_count = int(getattr(post, 'mediacount', 1) or 1)
+        is_carousel = typename == 'GraphSidecar' or media_count > 1
+
+        out = {
+            'url': url,
+            'thumbnail': thumbnail if isinstance(thumbnail, str) and thumbnail.startswith('http') else None,
+            'caption': caption,
+            'owner': owner,
+            'likes': likes,
+            'comments': comments,
+            'isVideo': is_video,
+            'isCarousel': is_carousel,
+        }
+
+        posted_at = getattr(post, 'date_utc', None) or getattr(post, 'date', None)
+        if posted_at is not None:
+            try:
+                out['postedAt'] = posted_at.isoformat() + ('Z' if posted_at.tzinfo is None else '')
+            except Exception:
+                pass
+
+        return out
+    except Exception:
+        return None
+
+def _post_to_single_dict(post):
+    """Map an Instaloader Post → the shape extract-and-twist.js expects.
+
+    Consumer reads: caption, ownerUsername, displayUrl, images[], childPosts[].displayUrl.
+    We return both flat and Apify-equivalent keys so the existing normalizer paths work.
+    """
+    try:
+        owner_username = getattr(post, 'owner_username', None) or ''
+        caption = getattr(post, 'caption', None) or ''
+        display_url = getattr(post, 'url', None) or getattr(post, 'display_url', None) or ''
+        is_video = bool(getattr(post, 'is_video', False))
+
+        images = []
+        if isinstance(display_url, str) and display_url.startswith('http'):
+            images.append(display_url)
+
+        # Sidecar / carousel: walk get_sidecar_nodes() for each child image URL.
+        try:
+            if getattr(post, 'typename', '') == 'GraphSidecar':
+                for node in post.get_sidecar_nodes():
+                    node_url = getattr(node, 'display_url', None)
+                    if isinstance(node_url, str) and node_url.startswith('http') and node_url not in images:
+                        images.append(node_url)
+        except Exception:
+            pass
+
+        return {
+            'caption': caption if isinstance(caption, str) else '',
+            'owner': owner_username,
+            'ownerUsername': owner_username,
+            'displayUrl': display_url,
+            'images': images,
+            'isVideo': is_video,
+        }
+    except Exception:
+        return None
+
+def _blocked_response():
+    return jsonify({'error': 'blocked'}), 503
+
+def _is_blocked_exception(e):
+    if isinstance(e, (ConnectionException, LoginRequiredException, InvalidArgumentException, IPSWatchdogException)):
+        return True
+    # Heuristic for older instaloader builds whose exception classes don't subclass cleanly.
+    msg = str(e).lower()
+    return ('login' in msg and 'required' in msg) or '401' in msg or '403' in msg or 'checkpoint' in msg
+
+# ── Existing yt-dlp download endpoint (unchanged) ─────────────────────
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok'})
+    return jsonify({'status': 'ok', 'instaloader': INSTALOADER_AVAILABLE})
 
 @app.route('/download', methods=['POST', 'OPTIONS'])
 def download():
@@ -73,6 +299,256 @@ def download():
             'ext': ext,
             'size_mb': round(size_mb, 2)
         })
+
+
+# ── Instaloader endpoints ─────────────────────────────────────────────
+def _parse_limit(default=12, cap=24):
+    try:
+        n = int(request.args.get('limit', default))
+    except Exception:
+        n = default
+    return max(1, min(cap, n))
+
+@app.route('/instagram/posts', methods=['GET'])
+def instagram_posts():
+    if not INSTALOADER_AVAILABLE:
+        return _blocked_response()
+
+    username = (request.args.get('username') or '').strip().lstrip('@')
+    if not username or not all(c.isalnum() or c in '._' for c in username) or len(username) > 100:
+        return jsonify({'error': 'Invalid username'}), 400
+    limit = _parse_limit()
+
+    cache_key = ('posts', username.lower(), limit)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    loader = get_loader()
+    posts_out = []
+
+    def _scrape():
+        profile = instaloader.Profile.from_username(loader.context, username)
+        collected = []
+        for i, post in enumerate(profile.get_posts()):
+            if i >= limit or _deadline_exceeded():
+                break
+            mapped = _post_to_browse_dict(post)
+            if mapped:
+                collected.append(mapped)
+            # Polite delay between iterations
+            time.sleep(0.4)
+        return collected
+
+    try:
+        ok, value = _run_with_timeout(_scrape, timeout_sec=min(45, REQUEST_DEADLINE_SEC - 5))
+        if not ok:
+            if isinstance(value, TimeoutError):
+                return _blocked_response()
+            if _is_blocked_exception(value):
+                return _blocked_response()
+            if isinstance(value, (QueryReturnedNotFoundException, ProfileNotExistsException)):
+                return jsonify({'posts': []})
+            return _blocked_response()
+        posts_out = value or []
+    except Exception as e:  # noqa: BLE001
+        if _is_blocked_exception(e):
+            return _blocked_response()
+        return _blocked_response()
+
+    payload = {'posts': posts_out}
+    cache_set(cache_key, payload)
+    return jsonify(payload)
+
+
+@app.route('/instagram/post', methods=['GET'])
+def instagram_post():
+    if not INSTALOADER_AVAILABLE:
+        return _blocked_response()
+
+    url = (request.args.get('url') or '').strip()
+    if not url:
+        return jsonify({'error': 'Missing url'}), 400
+
+    # Parse shortcode from a /p/<code>/ or /reel/<code>/ or /tv/<code>/ URL.
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').lower()
+        if not (host.endswith('instagram.com') or host.endswith('instagr.am')):
+            return jsonify({'error': 'Not an Instagram URL'}), 400
+        parts = [p for p in (parsed.path or '').split('/') if p]
+        shortcode = None
+        for marker in ('p', 'reel', 'reels', 'tv'):
+            if marker in parts:
+                idx = parts.index(marker)
+                if idx + 1 < len(parts):
+                    shortcode = parts[idx + 1]
+                    break
+        if not shortcode or not all(c.isalnum() or c in '-_' for c in shortcode):
+            return jsonify({'error': 'Could not parse shortcode'}), 400
+    except Exception:
+        return jsonify({'error': 'Invalid url'}), 400
+
+    cache_key = ('post', shortcode, 0)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    loader = get_loader()
+
+    def _scrape():
+        return instaloader.Post.from_shortcode(loader.context, shortcode)
+
+    try:
+        ok, value = _run_with_timeout(_scrape, timeout_sec=15)
+        if not ok:
+            if isinstance(value, TimeoutError):
+                return _blocked_response()
+            if isinstance(value, (QueryReturnedNotFoundException,)):
+                return jsonify({'error': 'not_found'}), 404
+            if _is_blocked_exception(value):
+                return _blocked_response()
+            return _blocked_response()
+        post = value
+        if post is None:
+            return _blocked_response()
+        mapped = _post_to_single_dict(post)
+        if not mapped:
+            return _blocked_response()
+        cache_set(cache_key, mapped)
+        return jsonify(mapped)
+    except Exception as e:  # noqa: BLE001
+        if _is_blocked_exception(e):
+            return _blocked_response()
+        return _blocked_response()
+
+
+@app.route('/instagram/hashtag', methods=['GET'])
+def instagram_hashtag():
+    if not INSTALOADER_AVAILABLE:
+        return _blocked_response()
+
+    tag = (request.args.get('tag') or '').strip().lstrip('#').lower()
+    tag = ''.join(c for c in tag if c.isalnum() or c == '_')[:100]
+    if not tag:
+        return jsonify({'error': 'Invalid tag'}), 400
+    limit = _parse_limit()
+
+    cache_key = ('hashtag', tag, limit)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    loader = get_loader()
+
+    def _scrape():
+        hashtag = instaloader.Hashtag.from_name(loader.context, tag)
+        collected = []
+        # Prefer top posts (matches "Apify hashtag URL → posts" semantics).
+        try:
+            iterator = hashtag.get_top_posts()
+        except Exception:
+            iterator = hashtag.get_posts()
+        for i, post in enumerate(iterator):
+            if i >= limit or _deadline_exceeded():
+                break
+            mapped = _post_to_browse_dict(post)
+            if mapped:
+                collected.append(mapped)
+            time.sleep(0.4)
+        return collected
+
+    try:
+        ok, value = _run_with_timeout(_scrape, timeout_sec=min(45, REQUEST_DEADLINE_SEC - 5))
+        if not ok:
+            if isinstance(value, TimeoutError):
+                return _blocked_response()
+            if _is_blocked_exception(value):
+                return _blocked_response()
+            if isinstance(value, (QueryReturnedNotFoundException,)):
+                return jsonify({'posts': []})
+            return _blocked_response()
+        payload = {'posts': value or []}
+        cache_set(cache_key, payload)
+        return jsonify(payload)
+    except Exception as e:  # noqa: BLE001
+        if _is_blocked_exception(e):
+            return _blocked_response()
+        return _blocked_response()
+
+
+@app.route('/instagram/search', methods=['GET'])
+def instagram_search():
+    if not INSTALOADER_AVAILABLE:
+        return _blocked_response()
+
+    q = (request.args.get('q') or '').strip()
+    if not q or len(q) > 200:
+        return jsonify({'error': 'Invalid q'}), 400
+    limit = _parse_limit()
+
+    cache_key = ('search', q.lower(), limit)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    loader = get_loader()
+
+    def _scrape():
+        # Instaloader anonymous user-search is limited. Strategy: take the
+        # query as a potential handle (strip spaces, @), try as a profile;
+        # if that fails, attempt TopSearchResults (works without login on
+        # some builds).
+        candidate = q.replace(' ', '').lstrip('@').lower()
+        candidate = ''.join(c for c in candidate if c.isalnum() or c in '._')
+        target_username = None
+        if candidate and 2 <= len(candidate) <= 30:
+            try:
+                profile = instaloader.Profile.from_username(loader.context, candidate)
+                target_username = profile.username
+            except Exception:
+                target_username = None
+
+        if not target_username:
+            try:
+                from instaloader import TopSearchResults  # type: ignore
+                results = TopSearchResults(loader.context, q)
+                for p in results.get_profiles():
+                    target_username = p.username
+                    break
+            except Exception:
+                target_username = None
+
+        if not target_username:
+            return []
+
+        profile = instaloader.Profile.from_username(loader.context, target_username)
+        collected = []
+        for i, post in enumerate(profile.get_posts()):
+            if i >= limit or _deadline_exceeded():
+                break
+            mapped = _post_to_browse_dict(post)
+            if mapped:
+                collected.append(mapped)
+            time.sleep(0.4)
+        return collected
+
+    try:
+        ok, value = _run_with_timeout(_scrape, timeout_sec=min(45, REQUEST_DEADLINE_SEC - 5))
+        if not ok:
+            if isinstance(value, TimeoutError):
+                return _blocked_response()
+            if _is_blocked_exception(value):
+                return _blocked_response()
+            return _blocked_response()
+        payload = {'posts': value or []}
+        cache_set(cache_key, payload)
+        return jsonify(payload)
+    except Exception as e:  # noqa: BLE001
+        if _is_blocked_exception(e):
+            return _blocked_response()
+        return _blocked_response()
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
