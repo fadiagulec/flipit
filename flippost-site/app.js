@@ -44,7 +44,7 @@ function recordFlipSuccess() {
 // https://dashboard.stripe.com/payment-links once you create the new
 // product. The current value is the existing $37 link, so the paywall
 // keeps working until you swap it.
-const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
+const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/fZu4gs1Fk4660fw1aS3Je0p';
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
 // Image Prompts / Video Prompts / Vision while on free tier) | 'pro_cap'
@@ -176,7 +176,7 @@ function renderTrialBanner() {
     }
 
     const ctaLink = document.createElement('a');
-    ctaLink.href = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
+    ctaLink.href = 'https://buy.stripe.com/fZu4gs1Fk4660fw1aS3Je0p';
     ctaLink.target = '_blank';
     ctaLink.rel = 'noopener';
     ctaLink.style.cssText = 'color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;';
