@@ -39,18 +39,12 @@ function recordFlipSuccess() {
     renderTrialBanner();
 }
 
-// Three-tier pricing. Stripe payment links \u2014 REPLACE these with your real
-// links from https://dashboard.stripe.com/payment-links after creating:
-//   1. $9/month subscription product \u2192 PAYMENT_LINK_MONTHLY
-//   2. $47/year subscription product \u2192 PAYMENT_LINK_YEARLY
-//   3. $67 one-time payment product  \u2192 PAYMENT_LINK_LIFETIME (existing link
-//      stays here as the fallback so paywall keeps working before you finish
-//      Stripe setup).
-const STRIPE_LINKS = {
-    monthly:  'https://buy.stripe.com/REPLACE_WITH_9_MONTH_LINK',
-    yearly:   'https://buy.stripe.com/REPLACE_WITH_47_YEAR_LINK',
-    lifetime: 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d'  // current $37 link until you swap to $67
-};
+// Single-tier pricing: $67 lifetime, one-time payment, no subscriptions.
+// Stripe link \u2014 REPLACE this with your real $67 link from
+// https://dashboard.stripe.com/payment-links once you create the new
+// product. The current value is the existing $37 link, so the paywall
+// keeps working until you swap it.
+const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
 // Image Prompts / Video Prompts / Vision while on free tier) | 'pro_cap'
@@ -62,7 +56,7 @@ function showPaywallModal(state, reason) {
     modal.id = 'flipit-paywall';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;overflow-y:auto;';
     const card = document.createElement('div');
-    card.style.cssText = 'background:#fff;border-radius:16px;padding:32px 28px;max-width:560px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);position:relative;';
+    card.style.cssText = 'background:#fff;border-radius:16px;padding:36px 32px;max-width:480px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);position:relative;';
 
     const isProCap = reason === 'pro_cap' || (state && state.isPro && (state.proCapHit === 'daily' || state.proCapHit === 'monthly'));
     const isProFeature = reason === 'pro_feature';
@@ -82,7 +76,7 @@ function showPaywallModal(state, reason) {
         }
     } else if (isProFeature) {
         h3.textContent = '\u{1F512} Pro-only feature';
-        p1.textContent = 'Image Prompts, Video Prompts, and AI Vision are Pro-tier features. Free tier includes 3 flips/day with the rate-and-rewrite engine. Unlock all features below.';
+        p1.textContent = 'Image Prompts, Video Prompts, and AI Vision are Pro features. Free tier gets 3 flips/day with rate + rewrite. Unlock everything below \u2014 one-time payment, no subscription.';
     } else {
         h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
         const daysSince = Math.max(0, ((state && state.daysSinceFirstUse) || 0) - 7);
@@ -95,83 +89,24 @@ function showPaywallModal(state, reason) {
     card.appendChild(p1);
 
     if (isProCap) {
-        // Pro user hit a cap \u2014 they already paid, don't show new pricing tiers
+        // Pro user hit a cap \u2014 they already paid, don't show pricing again
         const mail = document.createElement('a');
         mail.href = 'mailto:contact@earnwith-ai.com?subject=FlipIt%20Custom%20Plan';
         mail.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:8px;';
         mail.textContent = '\u{1F4E7} Contact about a custom plan';
         card.appendChild(mail);
     } else {
-        // Free user \u2014 show 3-tier pricing grid
-        const grid = document.createElement('div');
-        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px;';
-
-        // \u2500\u2500 Monthly \u2500\u2500
-        const monthly = document.createElement('a');
-        monthly.href = STRIPE_LINKS.monthly;
-        monthly.target = '_blank';
-        monthly.rel = 'noopener';
-        monthly.style.cssText = 'display:block;text-decoration:none;border:2px solid #e5e7eb;border-radius:12px;padding:18px 12px;color:#1a1a2e;transition:transform 0.15s,border-color 0.15s;';
-        monthly.onmouseenter = () => { monthly.style.transform = 'translateY(-2px)'; monthly.style.borderColor = '#0d6e66'; };
-        monthly.onmouseleave = () => { monthly.style.transform = 'translateY(0)'; monthly.style.borderColor = '#e5e7eb'; };
-        const mLabel = document.createElement('div');
-        mLabel.style.cssText = 'font-size:13px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;';
-        mLabel.textContent = 'Monthly';
-        const mPrice = document.createElement('div');
-        mPrice.style.cssText = 'font-size:28px;font-weight:800;color:#1a1a2e;line-height:1;';
-        mPrice.innerHTML = '$9<span style="font-size:14px;color:#888;font-weight:500;">/mo</span>';
-        const mNote = document.createElement('div');
-        mNote.style.cssText = 'font-size:12px;color:#888;margin-top:8px;line-height:1.3;';
-        mNote.textContent = 'Cancel anytime';
-        monthly.appendChild(mLabel); monthly.appendChild(mPrice); monthly.appendChild(mNote);
-
-        // \u2500\u2500 Yearly (BEST VALUE) \u2500\u2500
-        const yearly = document.createElement('a');
-        yearly.href = STRIPE_LINKS.yearly;
-        yearly.target = '_blank';
-        yearly.rel = 'noopener';
-        yearly.style.cssText = 'display:block;text-decoration:none;border:2px solid #0d6e66;border-radius:12px;padding:18px 12px;color:#1a1a2e;background:linear-gradient(180deg,#f0fdfa,#fff);position:relative;transition:transform 0.15s;';
-        yearly.onmouseenter = () => { yearly.style.transform = 'translateY(-2px)'; };
-        yearly.onmouseleave = () => { yearly.style.transform = 'translateY(0)'; };
-        const yBadge = document.createElement('div');
-        yBadge.style.cssText = 'position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#0d6e66;color:#fff;font-size:10px;font-weight:800;padding:3px 10px;border-radius:999px;letter-spacing:0.5px;';
-        yBadge.textContent = 'BEST VALUE';
-        const yLabel = document.createElement('div');
-        yLabel.style.cssText = 'font-size:13px;color:#0d6e66;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;';
-        yLabel.textContent = 'Yearly';
-        const yPrice = document.createElement('div');
-        yPrice.style.cssText = 'font-size:28px;font-weight:800;color:#0d6e66;line-height:1;';
-        yPrice.innerHTML = '$47<span style="font-size:14px;color:#666;font-weight:500;">/yr</span>';
-        const yNote = document.createElement('div');
-        yNote.style.cssText = 'font-size:12px;color:#666;margin-top:8px;line-height:1.3;font-weight:600;';
-        yNote.textContent = 'Save 57% \u00B7 4mo free';
-        yearly.appendChild(yBadge); yearly.appendChild(yLabel); yearly.appendChild(yPrice); yearly.appendChild(yNote);
-
-        // \u2500\u2500 Lifetime \u2500\u2500
-        const lifetime = document.createElement('a');
-        lifetime.href = STRIPE_LINKS.lifetime;
-        lifetime.target = '_blank';
-        lifetime.rel = 'noopener';
-        lifetime.style.cssText = 'display:block;text-decoration:none;border:2px solid #e5e7eb;border-radius:12px;padding:18px 12px;color:#1a1a2e;transition:transform 0.15s,border-color 0.15s;';
-        lifetime.onmouseenter = () => { lifetime.style.transform = 'translateY(-2px)'; lifetime.style.borderColor = '#c2185b'; };
-        lifetime.onmouseleave = () => { lifetime.style.transform = 'translateY(0)'; lifetime.style.borderColor = '#e5e7eb'; };
-        const lLabel = document.createElement('div');
-        lLabel.style.cssText = 'font-size:13px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;';
-        lLabel.textContent = 'Lifetime';
-        const lPrice = document.createElement('div');
-        lPrice.style.cssText = 'font-size:28px;font-weight:800;color:#c2185b;line-height:1;';
-        lPrice.innerHTML = '$67<span style="font-size:14px;color:#888;font-weight:500;"> once</span>';
-        const lNote = document.createElement('div');
-        lNote.style.cssText = 'font-size:12px;color:#888;margin-top:8px;line-height:1.3;';
-        lNote.textContent = 'One-time, no renewal';
-        lifetime.appendChild(lLabel); lifetime.appendChild(lPrice); lifetime.appendChild(lNote);
-
-        grid.appendChild(monthly); grid.appendChild(yearly); grid.appendChild(lifetime);
-        card.appendChild(grid);
-
+        // Single CTA: $67 lifetime, one-time payment
+        const a = document.createElement('a');
+        a.href = STRIPE_LIFETIME_LINK;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:16px 36px;border-radius:10px;font-weight:700;font-size:17px;margin-bottom:12px;';
+        a.textContent = '\u26A1 Unlock FlipIt \u2014 $67 Lifetime';
+        card.appendChild(a);
         const trust = document.createElement('p');
-        trust.style.cssText = 'color:#888;font-size:12px;margin:10px 0 0;line-height:1.5;';
-        trust.textContent = 'All plans unlock Image Prompts \u00B7 Video Prompts \u00B7 AI Vision \u00B7 Higher daily limits \u00B7 30-day refund';
+        trust.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;line-height:1.5;';
+        trust.textContent = 'One-time payment \u00B7 No subscription \u00B7 30-day refund \u00B7 All future updates included';
         card.appendChild(trust);
     }
 
