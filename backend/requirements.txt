@@ -1,6 +1,8 @@
-flask==3.0.3
-flask-cors==4.0.0
-requests==2.31.0
-yt-dlp[default]>=2025.1.15
+flask>=3.0.0
+flask-cors>=4.0.0
+requests>=2.32.0
+yt-dlp[default]==2026.3.17
 curl-cffi>=0.7.0
 instaloader>=4.13
+# Railway's new Railpack builder defaults to gunicorn for Flask apps.
+gunicorn>=21.2.0
