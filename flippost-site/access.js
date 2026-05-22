@@ -1,6 +1,6 @@
 /* FlipIt freemium access helper.
  * Exposes window.FlipItAccess. Plain script, no modules.
- * 7-day trial -> 3 flips/day forever -> $37 unlocks unlimited.
+ * 7-day trial -> 3 flips/day forever -> $57 unlocks unlimited.
  */
 (function () {
   'use strict';

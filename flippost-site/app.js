@@ -39,11 +39,10 @@ function recordFlipSuccess() {
     renderTrialBanner();
 }
 
-// Single-tier pricing: $67 lifetime, one-time payment, no subscriptions.
-// Stripe link \u2014 REPLACE this with your real $67 link from
-// https://dashboard.stripe.com/payment-links once you create the new
-// product. The current value is the existing $37 link, so the paywall
-// keeps working until you swap it.
+// Single-tier pricing: $57 lifetime (anchored against $99), one-time, no subs.
+// Stripe link \u2014 still points to the $67 Stripe product. REPLACE with the
+// new $57 payment link from https://dashboard.stripe.com/payment-links so
+// what customers actually get charged matches the displayed price.
 const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/fZu4gs1Fk4660fw1aS3Je0p';
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
@@ -96,13 +95,13 @@ function showPaywallModal(state, reason) {
         mail.textContent = '\u{1F4E7} Contact about a custom plan';
         card.appendChild(mail);
     } else {
-        // Single CTA: $67 lifetime, one-time payment
+        // Single CTA: $57 lifetime, one-time payment (anchored against $99)
         const a = document.createElement('a');
         a.href = STRIPE_LIFETIME_LINK;
         a.target = '_blank';
         a.rel = 'noopener';
         a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:16px 36px;border-radius:10px;font-weight:700;font-size:17px;margin-bottom:12px;';
-        a.textContent = '\u26A1 Unlock FlipIt \u2014 $67 Lifetime';
+        a.innerHTML = '\u26A1 Unlock FlipIt \u2014 <s style="opacity:0.65;font-weight:600;">$99</s> $57 Lifetime';
         card.appendChild(a);
         const trust = document.createElement('p');
         trust.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;line-height:1.5;';
@@ -180,7 +179,7 @@ function renderTrialBanner() {
     ctaLink.target = '_blank';
     ctaLink.rel = 'noopener';
     ctaLink.style.cssText = 'color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;';
-    ctaLink.textContent = 'Lock in $37 lifetime \u2192';
+    ctaLink.textContent = 'Lock in $57 lifetime \u2192';
     banner.appendChild(ctaLink);
 
     document.body.insertBefore(banner, document.body.firstChild);

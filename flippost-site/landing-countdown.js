@@ -33,7 +33,7 @@
         if (diffMs <= 0) {
             // Launch window has passed — show final-hours messaging.
             if (banner) {
-                banner.innerHTML = '🔥 <strong>Final hours of founder’s pricing!</strong> Locked in at $37 — rises to $67 soon.';
+                banner.innerHTML = '🔥 <strong>Final hours of founder’s pricing!</strong> <s style="color:#aaa;">$99</s> just <strong>$57</strong> — price rises soon.';
             }
             return;
         }

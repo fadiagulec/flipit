@@ -342,7 +342,7 @@ function rateLimitResponse(corsHeaders, info) {
     } else if (scope === 'minute') {
         message = "Too many requests. Please wait a moment and try again.";
     } else {
-        message = "Free tier limit reached (3 flips/day). Resets at midnight UTC, or upgrade to Pro for $37 lifetime.";
+        message = "Free tier limit reached (3 flips/day). Resets at midnight UTC, or upgrade to Pro for $57 lifetime.";
     }
 
     return {
