@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FlipIt &mdash; Creator unlock</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+        body { background:#f7f3ec; min-height:100vh; display:flex; align-items:center; justify-content:center; margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+        .card { background:#fff; border-radius:16px; padding:36px 32px; max-width:480px; width:calc(100% - 32px); box-shadow:0 20px 60px rgba(0,0,0,0.12); text-align:center; }
+        h1 { font-size:22px; color:#1a1a2e; margin:0 0 8px; }
+        .sub { color:#6b6b6b; font-size:14px; margin:0 0 24px; line-height:1.5; }
+        .input { width:100%; padding:12px 14px; border:1px solid #d6cfc1; border-radius:8px; font-size:15px; box-sizing:border-box; margin-bottom:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+        .btn { display:inline-block; background:linear-gradient(135deg,#0d6e66,#0a9b8e); color:#fff; border:none; padding:14px 28px; border-radius:10px; font-weight:700; font-size:16px; cursor:pointer; }
+        .btn[disabled] { opacity:0.6; cursor:not-allowed; }
+        .status { margin-top:18px; font-size:14px; line-height:1.5; min-height:22px; }
+        .ok { color:#0d6e66; }
+        .err { color:#a23131; }
+        a.home { display:inline-block; margin-top:14px; color:#0d6e66; text-decoration:underline; font-size:14px; }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>Creator unlock</h1>
+        <p class="sub">Owner-only Pro access. Paste your creator code (or load this page with <code>?code=…</code>) to unlock FlipIt Pro on this browser.</p>
+        <form id="redeem-form" autocomplete="off">
+            <input id="code-input" class="input" type="password" placeholder="Creator code" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <button id="redeem-btn" class="btn" type="submit">Unlock Pro on this device</button>
+        </form>
+        <div id="status" class="status"></div>
+        <a class="home" href="/">&larr; Back to FlipIt</a>
+    </main>
+
+    <script src="access.js"></script>
+    <script>
+        (function () {
+            'use strict';
+            var form = document.getElementById('redeem-form');
+            var input = document.getElementById('code-input');
+            var btn = document.getElementById('redeem-btn');
+            var statusEl = document.getElementById('status');
+
+            function setStatus(msg, ok) {
+                statusEl.textContent = msg || '';
+                statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+            }
+
+            async function redeem(code) {
+                if (!code) { setStatus('Enter your creator code first.', false); return; }
+                btn.disabled = true;
+                setStatus('Verifying…', true);
+                try {
+                    var resp = await fetch('/.netlify/functions/redeem-creator', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: code })
+                    });
+                    var data = await resp.json().catch(function () { return {}; });
+                    if (!resp.ok || !data.token) {
+                        setStatus(data.error || ('Failed (' + resp.status + ').'), false);
+                        btn.disabled = false;
+                        return;
+                    }
+                    try { localStorage.setItem('flipit_pro', data.token); } catch (e) {}
+                    setStatus('Pro unlocked on this browser. Redirecting…', true);
+                    setTimeout(function () { window.location.replace('/'); }, 1200);
+                } catch (err) {
+                    setStatus('Network error. Try again.', false);
+                    btn.disabled = false;
+                }
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                redeem(input.value.trim());
+            });
+
+            // Auto-redeem when ?code=… is present, then scrub it from history
+            // so it doesn't sit in the browser bar / referrers.
+            try {
+                var params = new URLSearchParams(window.location.search);
+                var preset = params.get('code');
+                if (preset) {
+                    input.value = preset;
+                    history.replaceState(null, '', window.location.pathname);
+                    redeem(preset);
+                }
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+</body>
+</html>
