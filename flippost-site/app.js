@@ -43,7 +43,7 @@ function recordFlipSuccess() {
 // Stripe link \u2014 still points to the $67 Stripe product. REPLACE with the
 // new $57 payment link from https://dashboard.stripe.com/payment-links so
 // what customers actually get charged matches the displayed price.
-const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/fZu4gs1Fk4660fw1aS3Je0p';
+const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
 // Image Prompts / Video Prompts / Vision while on free tier) | 'pro_cap'
@@ -175,7 +175,7 @@ function renderTrialBanner() {
     }
 
     const ctaLink = document.createElement('a');
-    ctaLink.href = 'https://buy.stripe.com/fZu4gs1Fk4660fw1aS3Je0p';
+    ctaLink.href = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
     ctaLink.target = '_blank';
     ctaLink.rel = 'noopener';
     ctaLink.style.cssText = 'color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;';
