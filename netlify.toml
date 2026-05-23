@@ -44,6 +44,28 @@
   to = "/.netlify/functions/download"
   status = 200
 
+# Creator-only Pro unlock short URL. Memorable alias for the owner — visit
+# /unlock once per device and Pro activates automatically (creator.js reads
+# ?code= from the URL, POSTs it to redeem-creator, scrubs the URL, redirects
+# to /). Secret stays out of any committed file because :code is just a
+# wildcard placeholder filled in by whatever URL the owner actually visits.
+[[redirects]]
+  from = "/unlock/:code"
+  to = "/creator.html?code=:code"
+  status = 302
+
+# Never cache the creator unlock page or its script — a stale cached copy
+# of either re-broke unlock once already (inline-script CSP bug), and the
+# extra fetch per visit is negligible for a low-volume owner endpoint.
+[[headers]]
+  for = "/creator.html"
+  [headers.values]
+    Cache-Control = "no-store, must-revalidate"
+[[headers]]
+  for = "/creator.js"
+  [headers.values]
+    Cache-Control = "no-store, must-revalidate"
+
 # Security headers
 # CSP note: `script-src 'self'` is strict — no inline event handlers / scripts.
 # `style-src 'unsafe-inline'` is still required because the frontend uses
