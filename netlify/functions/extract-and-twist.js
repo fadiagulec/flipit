@@ -145,7 +145,15 @@ exports.handler = async function(event) {
 
     // FB-crawler UA + meta tags failed (the typical case for modern IG).
     // Try Railway/Instaloader first (free), then Apify on 503/error.
-    if (!originalText || originalText.length < 30) {
+    //
+    // Also fire when we *did* get caption but only have ≤1 image: IG carousels
+    // always return just the cover slide as og:image, so without this branch
+    // the Image Prompt feature produces 1 prompt for a 4-image carousel.
+    // Railway is free, Apify costs ~$0.005/call — acceptable for the per-slide
+    // Image Prompt UX win on a Pro-gated feature.
+    const needCaption = !originalText || originalText.length < 30;
+    const needMoreImages = sourceImages.length < 2;
+    if (needCaption || needMoreImages) {
       try {
         const railwayUrl = RAILWAY_URL + '/instagram/post?url=' + encodeURIComponent(url);
         const r = await fetch(railwayUrl, { signal: AbortSignal.timeout(RAILWAY_TIMEOUT_MS) });
@@ -179,8 +187,15 @@ exports.handler = async function(event) {
 
     // Use Apify's instagram-scraper (apify/instagram-scraper, 125M+ runs)
     // with directUrls + resultsType:posts. This actor reliably returns the
-    // caption + ownerUsername + image URLs within ~15-20s for public posts.
-    if (!originalText || originalText.length < 30) {
+    // caption + ownerUsername + childPosts[].displayUrl within ~15-20s.
+    //
+    // Recompute gates so we ALSO fall through here if Railway gave us caption
+    // but couldn't enumerate carousel children (rare, but happens when IG
+    // briefly blocks Instaloader). Apify's childPosts[] is the most reliable
+    // source of full carousel image URLs.
+    const stillNeedCaption = !originalText || originalText.length < 30;
+    const stillNeedMoreImages = sourceImages.length < 2;
+    if (stillNeedCaption || stillNeedMoreImages) {
       const apifyToken = process.env.APIFY_TOKEN;
       if (apifyToken) {
         try {
