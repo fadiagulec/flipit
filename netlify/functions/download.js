@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify function: /download
 // TikTok/YouTube -> Railway yt-dlp (base64), Twitter/X -> syndication API,
 // Instagram -> embed scrape + downloader links, others -> Cobalt/Microlink/OG
@@ -9,7 +11,7 @@ const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
 
-exports.handler = async (event) => {
+exports.handler = __wrapErr( async (event) => {
     const isPro = isProRequest(event);
   // Origin-allowlist CORS — was '*'. download.js is the highest-risk wildcard
   // endpoint because it can be free-tier-called from any site (rate limit 3/day
@@ -127,7 +129,7 @@ exports.handler = async (event) => {
     statusCode: 200, headers,
     body: JSON.stringify({ downloadUrl: null, openUrl: url, platform, source: 'manual', instruction: finalMessage })
   };
-};
+});
 
 function detectPlatform(url) {
   if (/instagram\.com|instagr\.am/i.test(url)) return 'instagram';

@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/instagram-browse
 //
 // Browses Instagram posts inside FlipIt so users can click "Flip & Rate"
@@ -32,7 +34,7 @@ const DEFAULT_LIMIT = 6;
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app';
 const RAILWAY_TIMEOUT_MS = 18000;
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     const isPro = isProRequest(event);
     const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
     const origin = event.headers?.origin || '';
@@ -233,7 +235,7 @@ exports.handler = async function (event) {
             })
         };
     }
-};
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

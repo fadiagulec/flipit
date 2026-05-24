@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/image-prompts
 //
 // Generates AI image prompts (Midjourney / DALL-E / Ideogram / Leonardo style)
@@ -15,7 +17,7 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     const isPro = isProRequest(event);
     // Origin-allowlist CORS — was '*'. Pro-gated, but still worth locking
     // so a malicious site can't burn quota by spamming OPTIONS preflights.
@@ -354,4 +356,4 @@ exports.handler = async function (event) {
             body: JSON.stringify({ error: 'Image prompt generation failed. Please try again.' })
         };
     }
-};
+});

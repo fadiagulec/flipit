@@ -1,3 +1,6 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
+
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
@@ -7,7 +10,7 @@ const { assertPublicUrl } = require('./_ssrf_guard');
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app';
 const RAILWAY_TIMEOUT_MS = 18000;
 
-exports.handler = async function(event) {
+exports.handler = __wrapErr(async function(event) {
     const isPro = isProRequest(event);
   const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
   const origin = event.headers?.origin || '';
@@ -442,4 +445,4 @@ exports.handler = async function(event) {
     console.error('AI processing error:', err.message);
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Something went wrong. Please try again.' }) };
   }
-};
+});

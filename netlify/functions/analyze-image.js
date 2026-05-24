@@ -2,13 +2,16 @@
 // Takes an image URL, sends it to Claude Vision, and returns
 // a detailed AI image prompt to recreate a similar image.
 
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
 
-exports.handler = async (event) => {
+exports.handler = __wrapErr(async (event) => {
     const isPro = isProRequest(event);
   // Origin-allowlist CORS — was '*', which let any site burn Anthropic
   // credits via this endpoint. The rate limiter caps per IP, but a
@@ -87,7 +90,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: userMsg })
     };
   }
-};
+});
 
 // Fetch the image server-side and convert to base64 so Claude Vision can
 // analyze images that block hot-linking from Anthropic's servers

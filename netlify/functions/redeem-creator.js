@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/redeem-creator
 //
 // Issues a long-lived Pro token to anyone who knows the secret creator code
@@ -22,7 +24,7 @@ const crypto = require('crypto');
 const TOKEN_PREFIX = 'flpt.';
 const TOKEN_TTL_SECONDS = 5 * 365 * 24 * 60 * 60; // 5 years
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     const allowedOrigins = [
         'https://flipit.earnwith-ai.com',
         'https://flipit-app.netlify.app'
@@ -83,7 +85,7 @@ exports.handler = async function (event) {
         headers,
         body: JSON.stringify({ token, expiresAt })
     };
-};
+});
 
 function mintToken(payload, secret) {
     const json = JSON.stringify(payload);

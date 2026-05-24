@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/issue-pro-token
 //
 // Verifies a Stripe Checkout session was actually paid, then issues an
@@ -26,7 +28,7 @@ const { enforceTokenIssueQuota, rateLimitResponse } = require('./_rate_limit');
 const TOKEN_PREFIX = 'flpt.';
 const TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     // CORS allowlist matching every other AI endpoint. Keeps the netlify.app
     // origin during the domain-migration window; remove after 30 days.
     const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
@@ -123,7 +125,7 @@ exports.handler = async function (event) {
             expiresAt: expiresAt
         })
     };
-};
+});
 
 // ── Token helpers (also used by the gated functions for verify) ───────────
 

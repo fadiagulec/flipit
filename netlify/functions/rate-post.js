@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/rate-post
 //
 // Scores a social-media post across 6 dimensions and returns a structured
@@ -24,7 +26,7 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     const isPro = isProRequest(event);
     const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
     const origin = event.headers?.origin || '';
@@ -198,4 +200,4 @@ exports.handler = async function (event) {
         console.error('Rate-post error:', err?.message || err);
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Rating failed. Please try again.' }) };
     }
-};
+});

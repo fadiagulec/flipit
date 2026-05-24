@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/niche-ideas
 //
 // Accepts POST { niche, description } and returns { twisted, prompt }.
@@ -8,7 +10,7 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
-exports.handler = async function(event) {
+exports.handler = __wrapErr( async function(event) {
     const isPro = isProRequest(event);
     // Origin-allowlist CORS — was '*'. Free-tier endpoint (3/day per IP)
     // burning Anthropic tokens, so denying cross-origin abuse is worthwhile.
@@ -160,4 +162,4 @@ Example opener: "..."
         console.error('niche-ideas error:', err.message);
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Something went wrong. Please try again.' }) };
     }
-};
+});

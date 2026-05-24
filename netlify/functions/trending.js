@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /.netlify/functions/trending
 //
 // Returns the day's most-engaged TikToks for a niche/hashtag.
@@ -99,7 +101,7 @@ const CURATED_FALLBACK = {
     ]
 };
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     // Origin-allowlist CORS — was '*'. trending.js makes Claude calls under
     // the free-tier IP limit, so a malicious site could still burn ~3 calls
     // per visitor IP before throttling kicks in.
@@ -177,7 +179,7 @@ exports.handler = async function (event) {
             note: 'Live trending unavailable — showing evergreen high-performers. Apify status: ' + (apifyResult.reason || 'unknown')
         })
     };
-};
+});
 
 // ── Tier 1: Apify ─────────────────────────────────────────────
 async function tryApify(hashtag, count) {

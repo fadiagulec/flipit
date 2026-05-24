@@ -1,3 +1,5 @@
+require('./_error_reporter');
+const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /video-prompts
 //
 // Generates 3 cinematic AI video prompts (main scene, b-roll, transition)
@@ -7,7 +9,7 @@
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
-exports.handler = async function (event) {
+exports.handler = __wrapErr( async function (event) {
     const isPro = isProRequest(event);
     // CORS allowlist — matches rate-post.js / extract-and-twist.js /
     // instagram-browse.js. PR #38 moved every AI endpoint off the wildcard
@@ -186,4 +188,4 @@ exports.handler = async function (event) {
         console.error('Video-prompts error:', err?.message || err);
         return { statusCode: 500, headers, body: JSON.stringify({ error: 'Video prompt generation failed. Please try again.' }) };
     }
-};
+});
