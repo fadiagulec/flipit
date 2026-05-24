@@ -83,7 +83,7 @@ seeing organic traffic.)
   closed in PR #10 with Netlify Blobs persistence.
 - **W1:** Trial reset via incognito — fix with email gate (PR #11)
 - **W2:** Pro buyers can copy their HMAC token + share. Acceptable leakage
-  for $37 lifetime; revisit if abuse becomes visible.
+  for $57 lifetime; revisit if abuse becomes visible.
 
 ## Required env vars summary
 

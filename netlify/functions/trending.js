@@ -100,8 +100,14 @@ const CURATED_FALLBACK = {
 };
 
 exports.handler = async function (event) {
+    // Origin-allowlist CORS — was '*'. trending.js makes Claude calls under
+    // the free-tier IP limit, so a malicious site could still burn ~3 calls
+    // per visitor IP before throttling kicks in.
+    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
+    const origin = event.headers?.origin || '';
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Content-Type': 'application/json'

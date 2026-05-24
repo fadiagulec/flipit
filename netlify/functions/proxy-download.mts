@@ -14,16 +14,29 @@ import { promises as dns } from 'dns';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT_MS = 25000;
 
-const corsHeaders: Record<string, string> = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS'
-};
+const ALLOWED_ORIGINS = new Set<string>([
+    'https://flipit.earnwith-ai.com',
+    'https://flipit-app.netlify.app'
+]);
 
-function jsonResponse(status: number, body: unknown): Response {
+// Origin-allowlist CORS — was '*'. proxy-download streams arbitrary upstream
+// bytes through our server, so allowing cross-origin abuse let any site bounce
+// traffic through our IP (and Netlify quota). SSRF guards already block
+// private targets; this closes the cross-origin-bandwidth abuse vector.
+function corsHeadersFor(req: Request): Record<string, string> {
+    const origin = req.headers.get('origin') || '';
+    const allowed = ALLOWED_ORIGINS.has(origin) ? origin : 'https://flipit.earnwith-ai.com';
+    return {
+        'Access-Control-Allow-Origin': allowed,
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS'
+    };
+}
+
+function jsonResponse(status: number, body: unknown, req: Request): Response {
     return new Response(JSON.stringify(body), {
         status,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...corsHeadersFor(req), 'Content-Type': 'application/json' }
     });
 }
 
@@ -105,31 +118,31 @@ function sanitizeFilename(name: string | undefined): string {
 
 export default async (req: Request, _context: Context): Promise<Response> => {
     if (req.method === 'OPTIONS') {
-        return new Response('', { status: 200, headers: corsHeaders });
+        return new Response('', { status: 200, headers: corsHeadersFor(req) });
     }
     if (req.method !== 'GET') {
-        return jsonResponse(405, { error: 'Method not allowed' });
+        return jsonResponse(405, { error: 'Method not allowed' }, req);
     }
 
     const reqUrl = new URL(req.url);
     const rawUrl = reqUrl.searchParams.get('url');
-    if (!rawUrl) return jsonResponse(400, { error: 'Invalid URL' });
+    if (!rawUrl) return jsonResponse(400, { error: 'Invalid URL' }, req);
 
     let parsed: URL;
     try {
         parsed = new URL(rawUrl);
     } catch {
-        return jsonResponse(400, { error: 'Invalid URL' });
+        return jsonResponse(400, { error: 'Invalid URL' }, req);
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        return jsonResponse(400, { error: 'Invalid URL' });
+        return jsonResponse(400, { error: 'Invalid URL' }, req);
     }
     if (isBlockedHost(parsed.hostname)) {
-        return jsonResponse(400, { error: 'Blocked hostname' });
+        return jsonResponse(400, { error: 'Blocked hostname' }, req);
     }
     // DNS-rebinding defense: also reject if hostname resolves to a private IP.
     if (await resolvesToBlockedIp(parsed.hostname)) {
-        return jsonResponse(400, { error: 'Blocked hostname' });
+        return jsonResponse(400, { error: 'Blocked hostname' }, req);
     }
 
     // Manually follow redirects so we can re-validate every hop. A public
@@ -154,12 +167,12 @@ export default async (req: Request, _context: Context): Promise<Response> => {
                 const loc = upstream.headers.get('location');
                 if (!loc) break;
                 let nextParsed: URL;
-                try { nextParsed = new URL(loc, currentUrl); } catch { return jsonResponse(502, { error: 'Bad redirect.' }); }
+                try { nextParsed = new URL(loc, currentUrl); } catch { return jsonResponse(502, { error: 'Bad redirect.' }, req); }
                 if (nextParsed.protocol !== 'http:' && nextParsed.protocol !== 'https:') {
-                    return jsonResponse(502, { error: 'Bad redirect.' });
+                    return jsonResponse(502, { error: 'Bad redirect.' }, req);
                 }
                 if (isBlockedHost(nextParsed.hostname) || await resolvesToBlockedIp(nextParsed.hostname)) {
-                    return jsonResponse(400, { error: 'Blocked redirect target.' });
+                    return jsonResponse(400, { error: 'Blocked redirect target.' }, req);
                 }
                 currentUrl = nextParsed.toString();
                 currentParsed = nextParsed;
@@ -169,18 +182,18 @@ export default async (req: Request, _context: Context): Promise<Response> => {
         }
     } catch (err) {
         console.error('Proxy fetch failed:', (err as Error)?.message);
-        return jsonResponse(502, { error: 'Could not retrieve that file.' });
+        return jsonResponse(502, { error: 'Could not retrieve that file.' }, req);
     }
     // @ts-ignore — upstream is guaranteed assigned by the loop above
-    if (!upstream) return jsonResponse(502, { error: 'Could not retrieve that file.' });
+    if (!upstream) return jsonResponse(502, { error: 'Could not retrieve that file.' }, req);
 
     if (!upstream.ok) {
         console.error('Proxy upstream non-OK:', upstream.status);
-        return jsonResponse(502, { error: 'Could not retrieve that file.' });
+        return jsonResponse(502, { error: 'Could not retrieve that file.' }, req);
     }
 
     if (!upstream.body) {
-        return jsonResponse(502, { error: 'Empty response from upstream.' });
+        return jsonResponse(502, { error: 'Empty response from upstream.' }, req);
     }
 
     const filename = sanitizeFilename(
@@ -191,7 +204,7 @@ export default async (req: Request, _context: Context): Promise<Response> => {
     const upstreamLen = upstream.headers.get('content-length');
 
     const respHeaders: Record<string, string> = {
-        ...corsHeaders,
+        ...corsHeadersFor(req),
         'Content-Type': upstreamCt,
         'Content-Disposition': 'attachment; filename="' + filename + '"',
         'Cache-Control': 'public, max-age=300'

@@ -17,8 +17,13 @@ const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = async function (event) {
     const isPro = isProRequest(event);
+    // Origin-allowlist CORS — was '*'. Pro-gated, but still worth locking
+    // so a malicious site can't burn quota by spamming OPTIONS preflights.
+    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
+    const origin = event.headers?.origin || '';
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Content-Type': 'application/json'

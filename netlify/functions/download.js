@@ -11,9 +11,16 @@ const { assertPublicUrl } = require('./_ssrf_guard');
 
 exports.handler = async (event) => {
     const isPro = isProRequest(event);
+  // Origin-allowlist CORS — was '*'. download.js is the highest-risk wildcard
+  // endpoint because it can be free-tier-called from any site (rate limit 3/day
+  // per IP) and hits paid downstream (Cobalt, Railway yt-dlp).
+  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
+  const origin = event.headers?.origin || '';
+  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
   const headers = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Content-Type': 'application/json'
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
