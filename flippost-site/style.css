@@ -381,7 +381,10 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 }
 
 /* ── ACTION BUTTONS WRAPPER ───────────────────────────────── */
-#actionButtons { display: none; gap: 12px; flex-wrap: wrap; }
+/* Flip button must always be visible. Was display:none, which left users
+   thinking the button didn't exist until they typed a URL. Validation on
+   click handles empty / unrecognized URLs with a friendly error. */
+#actionButtons { display: flex; gap: 12px; flex-wrap: wrap; }
 
 /* ── IMAGE PROMPTS: NICHE GRID ────────────────────────────── */
 .niche-grid {
