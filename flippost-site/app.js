@@ -228,11 +228,22 @@ function showPlatformBadge(url) {
 
     if (platform) {
         badge.textContent = `${platformEmojis[platform]} ${platform.toUpperCase()} detected`;
-        badge.style.display = 'inline-block';
+        badge.style.cssText = 'display:inline-block;background:#e8f4f3;color:#0d6e66;padding:6px 12px;border-radius:8px;font-weight:600;font-size:14px;margin-top:8px;';
         document.getElementById('actionButtons').style.display = 'flex';
         return platform;
     } else {
-        badge.style.display = 'none';
+        // Don't silently hide the button — tell the user WHY it's hidden.
+        // Special-case the owner-only /unlock/ link so the owner doesn't get
+        // stuck trying to "Flip" their own Pro unlock URL.
+        const isUnlockUrl = /^https?:\/\/[^/]*flipit\.earnwith-ai\.com\/unlock\//i.test(url)
+            || url.startsWith('/unlock/');
+        if (isUnlockUrl) {
+            badge.innerHTML = '⚠️ That\'s your Pro <strong>unlock link</strong> — paste it into your <strong>browser\'s address bar</strong> (top of the window), not here. This box is for Instagram/TikTok/YouTube post URLs.';
+            badge.style.cssText = 'display:block;background:#fff4e0;color:#8a5a00;padding:10px 14px;border-radius:8px;font-size:14px;margin-top:8px;line-height:1.5;border-left:3px solid #e0a020;';
+        } else {
+            badge.innerHTML = 'ℹ️ Paste a post URL from Instagram, TikTok, YouTube, LinkedIn, Facebook, X, or Threads. The Flip button will appear once a supported URL is detected.';
+            badge.style.cssText = 'display:block;background:#f3f2ee;color:#666;padding:10px 14px;border-radius:8px;font-size:13px;margin-top:8px;line-height:1.5;';
+        }
         document.getElementById('actionButtons').style.display = 'none';
         return null;
     }
