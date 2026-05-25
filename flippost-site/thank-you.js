@@ -100,34 +100,5 @@
         });
 })();
 
-// CSP-safe wiring for the affiliate-link Copy button. The previous inline
-// onclick was silently blocked by `script-src 'self'` so the button did
-// nothing — that breaks the post-purchase share moment.
-(function wireAffiliateCopy() {
-    var btn = document.getElementById('flipit-copy-affiliate');
-    if (!btn) return;
-    var url = 'https://flipit.earnwith-ai.com/flipit-landing-page.html';
-    btn.addEventListener('click', function () {
-        function done(label) { btn.textContent = label; setTimeout(function () { btn.textContent = 'Copy'; }, 2000); }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(function () { done('✅ Copied!'); }).catch(function () { fallback(); });
-        } else {
-            fallback();
-        }
-        function fallback() {
-            try {
-                var ta = document.createElement('textarea');
-                ta.value = url;
-                ta.style.position = 'fixed';
-                ta.style.top = '-1000px';
-                document.body.appendChild(ta);
-                ta.select();
-                var ok = document.execCommand && document.execCommand('copy');
-                document.body.removeChild(ta);
-                done(ok ? '✅ Copied!' : '❌ Copy failed');
-            } catch (e) {
-                done('❌ Copy failed');
-            }
-        }
-    });
-})();
+// Affiliate-link Copy button removed alongside the affiliate share box.
+// Real attribution requires a referral system we haven't built yet.
