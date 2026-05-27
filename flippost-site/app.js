@@ -287,6 +287,99 @@ function sniffMediaType(bytes) {
     return null;
 }
 
+// iOS Safari ignores <a download> entirely — a programmatic click on a
+// download link either navigates to the blob URL (opening the video as a
+// page) or silently does nothing. The only reliable way to "save" media on
+// iOS is to render it inline so the user can long-press → Save to Photos
+// / Save Image. Snaptik, Savefrom, etc. all use this pattern on iPhone.
+function isIOS() {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    // iPadOS 13+ identifies as macOS; detect by touch + platform.
+    const iPadOS = /Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1;
+    return /iPad|iPhone|iPod/.test(ua) || iPadOS;
+}
+
+// Show a modal containing the media (video or image) with explicit
+// long-press-to-save instructions. Used on iOS where <a download> is broken.
+function showIOSSaveModal(blobUrl, mime, suggestedFilename) {
+    const isVideo = /^video\//i.test(mime);
+    const isImage = /^image\//i.test(mime);
+
+    let modal = document.getElementById('flipit-ios-save');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'flipit-ios-save';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;overflow-y:auto;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:18px;padding:20px;max-width:420px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);position:relative;';
+
+    const h3 = document.createElement('h3');
+    h3.style.cssText = 'font-size:18px;color:#1a1a2e;margin:0 0 6px;line-height:1.3;';
+    h3.textContent = isVideo ? '🎬 Your video is ready' : '🖼️ Your image is ready';
+    card.appendChild(h3);
+
+    const tip = document.createElement('p');
+    tip.style.cssText = 'color:#555;margin:0 0 16px;font-size:14px;line-height:1.5;';
+    tip.innerHTML = isVideo
+        ? '<strong>Long-press the video below</strong> → <strong>"Save to Photos"</strong>.<br>iOS blocks one-click downloads — this is the only way.'
+        : '<strong>Long-press the image below</strong> → <strong>"Save to Photos"</strong>.';
+    card.appendChild(tip);
+
+    if (isVideo) {
+        const vid = document.createElement('video');
+        vid.src = blobUrl;
+        vid.controls = true;
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('webkit-playsinline', '');
+        vid.style.cssText = 'width:100%;max-width:380px;border-radius:12px;background:#000;margin-bottom:12px;';
+        card.appendChild(vid);
+    } else if (isImage) {
+        const img = document.createElement('img');
+        img.src = blobUrl;
+        img.alt = 'Tap and hold to save';
+        img.style.cssText = 'width:100%;max-width:380px;border-radius:12px;margin-bottom:12px;';
+        card.appendChild(img);
+    }
+
+    // Fallback: a regular link in case long-press doesn't surface Save (some
+    // 3rd party iOS browsers like Firefox iOS). Tapping it at least opens the
+    // media so the user can use the browser's own share menu.
+    const fallback = document.createElement('a');
+    fallback.href = blobUrl;
+    fallback.target = '_blank';
+    fallback.rel = 'noopener';
+    fallback.style.cssText = 'display:inline-block;color:#0d6e66;text-decoration:underline;font-size:13px;margin-bottom:8px;';
+    fallback.textContent = isVideo ? 'Or tap here to open the video' : 'Or tap here to open the image';
+    card.appendChild(fallback);
+
+    const close = document.createElement('button');
+    close.textContent = 'Done';
+    close.style.cssText = 'display:block;width:100%;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;padding:14px;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;margin-top:8px;';
+    close.addEventListener('click', () => modal.remove());
+    card.appendChild(close);
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+}
+
+// Trigger a save on desktop (programmatic <a download> click) OR on iOS
+// (long-press modal). Centralizes the iOS branching so callers don't repeat
+// the userAgent check.
+function triggerSave(blobUrl, mime, filename) {
+    if (isIOS()) {
+        showIOSSaveModal(blobUrl, mime, filename);
+        return;
+    }
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
 // Force-download a file from URL. Tries direct fetch first (works for
 // CORS-friendly sources like Cobalt tunnels). If that fails (LinkedIn /
 // Twitter CDN block CORS), falls back to a same-origin server-side proxy
@@ -315,13 +408,9 @@ async function forceDownload(mediaUrl, filename) {
 
         const blob = new Blob([bytes], { type: mime });
         const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = finalName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+        triggerSave(blobUrl, mime, finalName);
+        // Keep blob alive long enough for iOS modal user to long-press save.
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
         return true;
     } catch (directErr) {
         console.warn('Direct fetch failed:', directErr.message, '— trying server proxy');
@@ -350,13 +439,8 @@ async function forceDownload(mediaUrl, filename) {
 
         const blob = new Blob([bytes], { type: mime });
         const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = finalName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+        triggerSave(blobUrl, mime, finalName);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
         return true;
     } catch (proxyErr) {
         console.error('Proxy download failed:', proxyErr.message);
@@ -406,12 +490,15 @@ async function handleDownload() {
 
                 const blob = new Blob([byteArr], { type: mime });
                 const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = (data.filename || 'flipit-video').replace(/\.[a-z0-9]{2,4}$/i, '') + ext;
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
-                showSuccess(`✅ Video download started! (${(byteArr.length / 1048576).toFixed(1)} MB ${ext})`, 'errorMessage');
+                const finalName = (data.filename || 'flipit-video').replace(/\.[a-z0-9]{2,4}$/i, '') + ext;
+                triggerSave(blobUrl, mime, finalName);
+                // Keep blob alive long enough for iOS modal user to long-press save.
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+                if (isIOS()) {
+                    showSuccess(`📱 Video ready — long-press to save (${(byteArr.length / 1048576).toFixed(1)} MB ${ext})`, 'errorMessage');
+                } else {
+                    showSuccess(`✅ Video download started! (${(byteArr.length / 1048576).toFixed(1)} MB ${ext})`, 'errorMessage');
+                }
             } catch (e) {
                 console.error('Video decode failed:', e);
                 showError('❌ Could not save video. The file may be corrupted — try a shorter clip.', 'errorMessage');
