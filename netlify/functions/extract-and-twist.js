@@ -10,6 +10,54 @@ const { assertPublicUrl } = require('./_ssrf_guard');
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app';
 const RAILWAY_TIMEOUT_MS = 18000;
 
+// Smart image-URL dedup. The naive Array.from(new Set(urls)) treats two CDN
+// variants of the same Instagram image as distinct (e.g. scontent-ord5-1...
+// 640x640 vs scontent-ord5-3... 1080x1080) — same media ID, different size /
+// CDN node. The Image Prompt button then loops those URLs and generates one
+// "prompt per image" twice for the same actual photo, which the owner reported
+// as "image prompts getting split in two prompts."
+//
+// Strategy:
+//   1. Instagram CDN URLs (*.cdninstagram.com): extract the numeric media ID
+//      from the pathname (everything between the last '/' and '.jpg' /
+//      '.mp4'). That's stable across CDN nodes, sizes, and cache-bust params.
+//   2. Other hosts: dedupe by hostname+pathname (no query string), which
+//      catches the common "same image, different ?cache=XXXX" pattern.
+//   3. Fallback: full URL string (preserves the safety net for unrecognized
+//      patterns).
+// Returns the first URL we saw for each canonical key, preserving caller order
+// (so the highest-quality URL added first stays first).
+function dedupImageUrls(urls) {
+    const seen = new Set();
+    const out = [];
+    for (const raw of urls) {
+        if (typeof raw !== 'string' || !raw) continue;
+        let key = raw;
+        try {
+            const u = new URL(raw);
+            const host = u.hostname.toLowerCase();
+            if (host.endsWith('.cdninstagram.com') || host.endsWith('.fbcdn.net')) {
+                // IG/Meta CDN pattern: /v/<random>/<MEDIA_ID>_n.jpg (or .mp4).
+                // The filename is like 708655131_17887103097559366_888394800431546534_n.jpg
+                // — numbers + underscores + a single letter suffix (n, o, ...).
+                // We just strip the extension and use the rest as the canonical
+                // key, since that's stable across CDN nodes (-1 vs -3) and
+                // size params (s640x640 vs s1080x1080).
+                const tail = (u.pathname.split('/').pop() || '').toLowerCase();
+                const m = tail.match(/^(.+)\.(jpe?g|png|webp|mp4|mov|webm)$/);
+                key = m ? 'ig:' + m[1] : host + u.pathname;
+            } else {
+                key = host + u.pathname;
+            }
+        } catch { /* malformed URL — fall back to raw */ }
+        if (!seen.has(key)) {
+            seen.add(key);
+            out.push(raw);
+        }
+    }
+    return out;
+}
+
 exports.handler = __wrapErr(async function(event) {
     const isPro = isProRequest(event);
   const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
@@ -178,7 +226,7 @@ exports.handler = __wrapErr(async function(event) {
               }
             }
             if (collected.length > 0) {
-              sourceImages = Array.from(new Set(collected)).slice(0, 10);
+              sourceImages = dedupImageUrls(collected).slice(0, 10);
             }
           }
         }
@@ -245,7 +293,7 @@ exports.handler = __wrapErr(async function(event) {
                 }
               }
               if (collected.length > 0) {
-                sourceImages = Array.from(new Set(collected)).slice(0, 10);
+                sourceImages = dedupImageUrls(collected).slice(0, 10);
               }
             }
           } else {
