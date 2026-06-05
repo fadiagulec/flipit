@@ -101,6 +101,11 @@ exports.handler = __wrapErr( async function (event) {
         }
     ];
 
+    // HARD LENGTH BUDGET — max_tokens is 800 and Sonnet 4.6 generates at
+    // ~38 tok/s under load, so we have ~22s of wall-clock for ~800 tokens of
+    // output. If the prompt asks for 3 detailed scenes, SCENES alone eats the
+    // entire budget and CAPTIONS never completes. Constraining to 2 scenes
+    // leaves room for VOICEOVER + CAPTIONS to finish inside the limit.
     const buildUserPrompt = (spec) => [
         'Generate ONE AI video prompt that ILLUSTRATES this exact script (not generic content about the topic):',
         '',
@@ -112,11 +117,14 @@ exports.handler = __wrapErr( async function (event) {
         '',
         `Prompt brief: ${spec}`,
         '',
-        'The prompt MUST contain explicit SCENES (with timestamps), VOICEOVER (slow/measured pacing, ~140 wpm max), and CAPTIONS (exact on-screen text per scene with font/placement/animation) sections — do not omit any of these.',
+        'STRICT FORMAT — all three sections required, in this exact order, with these tight word budgets:',
+        '  • SCENES — EXACTLY 2 scenes (Scene 1 + Scene 2). Each scene: ≤80 words covering subject/action, lighting, camera move, color tone, transition. Use 0:00–0:04 and 0:04–0:09 timestamps.',
+        '  • VOICEOVER — tone + pace, then the VO script as plain text (≤60 words of script).',
+        '  • CAPTIONS — one short on-screen text per scene (3-7 words each), with font feel, placement, color, and animation note. Keep concise.',
         '',
-        'Make the prompt SPECIFIC to what this script is LITERALLY about — read the words and depict those exact objects/people/places. Reference real moments from the script. No generic lifestyle phrases. NO money screenshots, DM threads, or income notifications unless the script literally talks about those.',
+        'Be SPECIFIC to what the script literally says — depict those exact objects/people/places. Reference real moments from the script. No generic lifestyle phrases. NO money screenshots, DM threads, or income notifications unless the script literally mentions them.',
         '',
-        'Output the prompt as ONE block of plain text, no JSON, no preamble, no markdown fences. Start directly with the SCENES block.'
+        'Output ONE block of plain text. No JSON, no preamble, no markdown fences. Start directly with the SCENES header. End with CAPTIONS — do NOT leave any section incomplete. Target total length ≤500 words.'
     ].join('\n');
 
     // ── Generate one prompt via Claude (single call, ~1100 tokens) ──
@@ -133,6 +141,18 @@ exports.handler = __wrapErr( async function (event) {
                 // in this Promise.all hit cache → ~75% input-token discount
                 // and faster responses. Anthropic's ephemeral cache TTL is
                 // ~5 min, so subsequent flips by the same user also benefit.
+                //
+                // max_tokens tuning history:
+                //   800  — original, output truncated mid-VOICEOVER. CAPTIONS never generated.
+                //   1800 — tried, blew the 26s Netlify cap (each call ~22-25s, Promise.all
+                //          pinned to slowest).
+                //   1300 — still timed out at 24s AbortSignal on all 3 parallel calls.
+                //   1100 — current. Fits ~400 SCENES + ~350 VOICEOVER + ~250 CAPTIONS +
+                //          ~100 headroom. At ~80 tok/s ≈ 14s, well under the 24s timeout.
+                //
+                // The user prompt has been tightened to instruct concise per-section budgets,
+                // and the conciseness target is also baked into the body via the system
+                // prompt's "every clause earns its place" framing.
                 body: JSON.stringify({
                     model: 'claude-sonnet-4-6',
                     max_tokens: 800,
