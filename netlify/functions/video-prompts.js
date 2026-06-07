@@ -46,7 +46,7 @@ exports.handler = __wrapErr( async function (event) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request' }) };
     }
 
-    const { flippedScript, platform } = body;
+    const { flippedScript, platform, referenceImageUrl } = body;
 
     // ── Validate inputs ──────────────────────────────────────
     if (!flippedScript || typeof flippedScript !== 'string' || !flippedScript.trim()) {
@@ -59,6 +59,29 @@ exports.handler = __wrapErr( async function (event) {
     const safePlatform = (typeof platform === 'string' && platform.trim())
         ? platform.trim().toLowerCase()
         : null;
+
+    // Reference image (e.g. IG cover frame) — used as a vision anchor so the
+    // video prompts recreate the actual visual style of the source video,
+    // not a generic creator-at-desk default. Allowlist hosts to avoid SSRF
+    // and prevent attackers from making us fetch arbitrary URLs through the
+    // Anthropic vision API.
+    let safeReferenceImageUrl = null;
+    if (typeof referenceImageUrl === 'string' && referenceImageUrl.trim()) {
+        try {
+            const u = new URL(referenceImageUrl.trim());
+            const host = u.hostname.toLowerCase();
+            const isAllowed =
+                host.endsWith('.cdninstagram.com') ||
+                host.endsWith('.fbcdn.net') ||
+                host.endsWith('.twimg.com') ||
+                host.endsWith('.tiktokcdn.com') ||
+                host.endsWith('.ytimg.com') ||
+                host.endsWith('.licdn.com');
+            if (u.protocol === 'https:' && isAllowed) {
+                safeReferenceImageUrl = u.toString();
+            }
+        } catch { /* invalid URL — silently skip vision anchor */ }
+    }
 
     // ── API key check ────────────────────────────────────────
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -107,8 +130,12 @@ exports.handler = __wrapErr( async function (event) {
     // output. If the prompt asks for 3 detailed scenes, SCENES alone eats the
     // entire budget and CAPTIONS never completes. Constraining to 2 scenes
     // leaves room for VOICEOVER + CAPTIONS to finish inside the limit.
-    const buildUserPrompt = (spec) => [
-        'Generate ONE AI video prompt that ILLUSTRATES this exact script (not generic content about the topic):',
+    const buildUserPrompt = (spec, hasImage) => [
+        'Generate ONE AI video prompt that recreates the exact visual style of the source video AND illustrates the script.',
+        '',
+        hasImage
+            ? 'CRITICAL: Above this text is a frame from the actual source video. The prompt you generate MUST match what is shown in that frame — same SUBJECT (who/what is on camera), same SETTING (location, props, environment), same AESTHETIC (lighting style, color palette, mood), same FRAMING. Do NOT default to a generic "content creator at a minimal desk" scene. Use what is literally in the reference image.'
+            : 'No visual reference provided — anchor on what the script literally describes. Avoid generic creator stereotypes (no "creator at desk staring at cursor" unless the script literally says that).',
         '',
         '<script>',
         flippedScript,
@@ -123,10 +150,46 @@ exports.handler = __wrapErr( async function (event) {
         '  • VOICEOVER — tone + pace, then the VO script as plain text (≤60 words of script).',
         '  • CAPTIONS — one short on-screen text per scene (3-7 words each), with font feel, placement, color, and animation note. Keep concise.',
         '',
-        'Be SPECIFIC to what the script literally says — depict those exact objects/people/places. Reference real moments from the script. No generic lifestyle phrases. NO money screenshots, DM threads, or income notifications unless the script literally mentions them.',
+        'No generic lifestyle phrases. NO money screenshots, DM threads, or income notifications unless the script literally mentions them.',
         '',
         'Output ONE block of plain text. No JSON, no preamble, no markdown fences. Start directly with the SCENES header. End with CAPTIONS — do NOT leave any section incomplete. Target total length ≤500 words.'
     ].join('\n');
+
+    // Fetch the cover frame ONCE before the Promise.all, convert to base64,
+    // and share across all 3 parallel calls. Direct URL pass-through to
+    // Anthropic fails for IG CDN URLs because they're hot-link protected —
+    // Anthropic's server gets blocked. Base64 sidesteps that completely.
+    // Same pattern as analyze-image.js.
+    let referenceImage = null; // { mediaType, base64 } or null
+    if (safeReferenceImageUrl) {
+        try {
+            const r = await fetch(safeReferenceImageUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                    'Referer': 'https://www.google.com/'
+                },
+                redirect: 'follow',
+                signal: AbortSignal.timeout(8000)
+            });
+            if (r.ok) {
+                const buf = await r.arrayBuffer();
+                if (buf && buf.byteLength >= 100 && buf.byteLength <= 3 * 1024 * 1024) {
+                    const bytes = new Uint8Array(buf);
+                    let mediaType = 'image/jpeg';
+                    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) mediaType = 'image/png';
+                    else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) mediaType = 'image/gif';
+                    else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+                             bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mediaType = 'image/webp';
+                    referenceImage = { mediaType, base64: Buffer.from(buf).toString('base64') };
+                }
+            }
+        } catch (err) {
+            // Vision anchor is best-effort — if fetch fails, fall back to
+            // text-only mode rather than blocking the entire request.
+            console.error('Reference image fetch failed:', err?.message || err);
+        }
+    }
 
     // ── Generate one prompt via Claude (single call, ~1100 tokens) ──
     async function generateOne(spec, label) {
@@ -164,7 +227,20 @@ exports.handler = __wrapErr( async function (event) {
                             cache_control: { type: 'ephemeral' }
                         }
                     ],
-                    messages: [{ role: 'user', content: buildUserPrompt(spec) }]
+                    // Vision anchor: cover frame is sent as base64 (URL pass-
+                    // through fails because IG CDNs block Anthropic's fetcher).
+                    // referenceImage is fetched once above and reused across
+                    // all 3 parallel calls. If fetch failed, falls back to
+                    // text-only.
+                    messages: [{
+                        role: 'user',
+                        content: referenceImage
+                            ? [
+                                { type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } },
+                                { type: 'text', text: buildUserPrompt(spec, true) }
+                            ]
+                            : buildUserPrompt(spec, false)
+                    }]
                 }),
                 signal: AbortSignal.timeout(24000)
             });

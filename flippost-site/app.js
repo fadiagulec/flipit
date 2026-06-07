@@ -1145,10 +1145,14 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
         wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
         try {
+            // Pass the cover frame from the source post as a visual anchor.
+            // Without this, Claude defaults to generic "creator at desk" scenes
+            // that ignore what's literally in the source video.
+            const referenceImageUrl = (window._lastCarouselUrls && window._lastCarouselUrls[0]) || '';
             const res = await fetch('/.netlify/functions/video-prompts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ flippedScript, platform })
+                body: JSON.stringify({ flippedScript, platform, referenceImageUrl })
             });
             const data = await res.json();
             if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
