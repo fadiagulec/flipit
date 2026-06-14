@@ -33,9 +33,11 @@ exports.handler = __wrapErr( async (event) => {
   if (!quota.allowed) return rateLimitResponse(headers, quota);
 
   let url;
+  let removeWatermark = false;
   try {
     const body = JSON.parse(event.body || '{}');
     url = (body.url || '').trim();
+    removeWatermark = !!body.removeWatermark;
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
@@ -60,7 +62,7 @@ exports.handler = __wrapErr( async (event) => {
   let railwayTooLarge = null;
   if (platform === 'tiktok' || platform === 'youtube' || platform === 'instagram') {
     try {
-      const result = await tryRailway(url);
+      const result = await tryRailway(url, removeWatermark);
       if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
       if (result && result._tooLarge) railwayTooLarge = result.sizeMb;
     } catch (e) { console.log('Railway failed:', e.message); }
@@ -142,14 +144,14 @@ function detectPlatform(url) {
   return 'other';
 }
 
-async function tryRailway(url) {
+async function tryRailway(url, removeWatermark = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
   try {
     const res = await fetch(RAILWAY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, remove_watermark: removeWatermark }),
       signal: controller.signal
     });
     const data = await res.json();

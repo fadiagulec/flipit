@@ -463,11 +463,13 @@ async function handleDownload() {
     btn.disabled = true;
     btn.textContent = '\u23F3 Finding download link...';
 
+    const removeWatermark = !!(document.getElementById('removeWatermarkChk') && document.getElementById('removeWatermarkChk').checked);
+
     try {
         const res = await fetch(DOWNLOAD_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url, removeWatermark })
         });
 
         const data = await res.json();

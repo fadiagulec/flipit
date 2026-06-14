@@ -245,6 +245,12 @@ def download():
     if not url:
         return jsonify({'error': 'Missing url'}), 400
 
+    # Optional: crop the burned-in Instagram username/handle watermark off the
+    # bottom of the downloaded clip. We crop ~7% off the bottom which catches
+    # the IG share-overlay across phone resolutions (it ranges 50–80px on a
+    # 1920px-tall Reel) without losing meaningful content.
+    remove_watermark = bool(data.get('remove_watermark'))
+
     with tempfile.TemporaryDirectory() as tmpdir:
         out_tmpl = os.path.join(tmpdir, 'video.%(ext)s')
 
@@ -288,6 +294,37 @@ def download():
 
         filepath = files[0]
         ext = os.path.splitext(filepath)[1]
+
+        # Optional watermark crop. Bottom 7% covers the IG share-overlay
+        # (username + IG bird) across phone resolutions without losing
+        # meaningful content. Falls through silently on failure — better
+        # to deliver the watermarked video than fail the request entirely.
+        watermark_removed = False
+        if remove_watermark and ext.lower() in ('.mp4', '.mov', '.webm'):
+            cropped_path = os.path.join(tmpdir, 'cropped' + ext)
+            try:
+                ff = subprocess.run(
+                    [
+                        'ffmpeg', '-y',
+                        '-i', filepath,
+                        '-vf', 'crop=iw:ih*0.93:0:0',
+                        '-c:v', 'libx264',
+                        '-preset', 'veryfast',
+                        '-crf', '23',
+                        '-c:a', 'copy',
+                        '-movflags', '+faststart',
+                        cropped_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if ff.returncode == 0 and os.path.exists(cropped_path) and os.path.getsize(cropped_path) > 1024:
+                    filepath = cropped_path
+                    watermark_removed = True
+            except Exception:
+                pass
+
         size_mb = os.path.getsize(filepath) / (1024 * 1024)
 
         with open(filepath, 'rb') as f:
@@ -297,7 +334,8 @@ def download():
             'success': True,
             'videoData': video_b64,
             'ext': ext,
-            'size_mb': round(size_mb, 2)
+            'size_mb': round(size_mb, 2),
+            'watermark_removed': watermark_removed,
         })
 
 
