@@ -255,12 +255,16 @@ def download():
         out_tmpl = os.path.join(tmpdir, 'video.%(ext)s')
 
         def run_ytdlp(extra_args=[]):
+            # NOTE: --impersonate chrome was removed because the chrome target
+            # isn't always registered in curl-cffi at runtime (depends on
+            # version + extras). Falling back to a plain User-Agent header
+            # works for the vast majority of cases. Re-add impersonation only
+            # after pinning curl-cffi to a version with chrome bundled.
             cmd = [
                 'yt-dlp',
                 '--no-playlist',
                 '--max-filesize', '50m',
                 '--socket-timeout', '30',
-                '--impersonate', 'chrome',
                 '--output', out_tmpl,
                 '--add-header', 'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
             ] + extra_args + [url]
@@ -299,6 +303,8 @@ def download():
         # (username + IG bird) across phone resolutions without losing
         # meaningful content. Falls through silently on failure — better
         # to deliver the watermarked video than fail the request entirely.
+        # Errors are logged to stderr so Railway log search reveals whether
+        # ffmpeg is missing vs a real ffmpeg failure.
         watermark_removed = False
         if remove_watermark and ext.lower() in ('.mp4', '.mov', '.webm'):
             cropped_path = os.path.join(tmpdir, 'cropped' + ext)
@@ -322,8 +328,12 @@ def download():
                 if ff.returncode == 0 and os.path.exists(cropped_path) and os.path.getsize(cropped_path) > 1024:
                     filepath = cropped_path
                     watermark_removed = True
-            except Exception:
-                pass
+                else:
+                    print(f'[watermark] ffmpeg rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+            except FileNotFoundError:
+                print('[watermark] ffmpeg binary not installed in container', flush=True)
+            except Exception as e:
+                print(f'[watermark] ffmpeg error: {e}', flush=True)
 
         size_mb = os.path.getsize(filepath) / (1024 * 1024)
 

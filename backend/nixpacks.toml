@@ -1,0 +1,6 @@
+# Tell Nixpacks/Railpack to install ffmpeg as a system dependency.
+# Needed for the optional watermark-crop path in /download — yt-dlp's own
+# muxing may use ffmpeg as well, so this also future-proofs IG audio+video
+# merging if Railway's auto-detection ever stops bundling it.
+[phases.setup]
+aptPkgs = ["ffmpeg"]
