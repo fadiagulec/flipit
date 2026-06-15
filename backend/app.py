@@ -493,6 +493,18 @@ def erase_region():
         # Build the delogo filter chain. delogo requires the bounding box to
         # have at least 1px margin from the frame edge — clamp accordingly.
         # Cap at 5 regions so a malicious request can't pile up filters.
+        #
+        # We expand the user-drawn box by PAD px each side. Users almost always
+        # under-draw — they cover the visible glyphs but miss the faint outline
+        # / drop-shadow / antialiased edge, which is what shows up as a "stain"
+        # in the output. Padding sweeps that fringe into the interpolated zone.
+        #
+        # band=N controls how many pixels around the rect get 50%-blended
+        # instead of fully synthesized. Default is 4. Raising it makes the
+        # edges blend more naturally into the surrounding texture, which kills
+        # the visible seam that causes the smudge.
+        PAD = 8
+        BAND_TARGET = 12
         filters = []
         for r in regions[:5]:
             try:
@@ -502,13 +514,16 @@ def erase_region():
                 rh = int(float(r.get('h', 0)) * vh)
             except (TypeError, ValueError):
                 continue
-            # Clamp box inside frame with 1px margin all around
+            # Expand by PAD on each side, then clamp inside frame.
+            rx -= PAD; ry -= PAD; rw += 2 * PAD; rh += 2 * PAD
             rx = max(1, min(rx, vw - 3))
             ry = max(1, min(ry, vh - 3))
             rw = max(2, min(rw, vw - rx - 1))
             rh = max(2, min(rh, vh - ry - 1))
             if rw >= 2 and rh >= 2:
-                filters.append(f'delogo=x={rx}:y={ry}:w={rw}:h={rh}')
+                # delogo caps band at min(w,h)//2 - 1; honor that.
+                band = max(1, min(BAND_TARGET, min(rw, rh) // 2 - 1))
+                filters.append(f'delogo=x={rx}:y={ry}:w={rw}:h={rh}:band={band}')
 
         if not filters:
             return jsonify({'error': 'No valid regions after clamping'}), 400
