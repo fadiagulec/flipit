@@ -621,7 +621,7 @@ function openEraseModal() {
     // Much wider card so the preview is actually usable. min(96vw, 880px)
     // gives a near-full-screen workspace on phone AND room for precise
     // drawing on desktop.
-    card.style.cssText = 'background:#fff;border-radius:14px;padding:18px;width:min(96vw,880px);max-height:96vh;overflow-y:auto;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+    card.style.cssText = 'background:#fff;border-radius:14px;padding:18px;width:min(96vw,1000px);max-height:96vh;overflow-y:auto;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
 
     const h3 = document.createElement('h3');
     h3.textContent = '🎯 Draw boxes over what to erase';
@@ -636,7 +636,7 @@ function openEraseModal() {
     // canvas overlay aligned to the same pixel area. min(800px, 70vh, 96%)
     // keeps the stage big on desktop while never overflowing on phone.
     const stage = document.createElement('div');
-    stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:760px;max-height:70vh;background:#000;border-radius:10px;overflow:hidden;';
+    stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:900px;max-height:82vh;background:#000;border-radius:10px;overflow:hidden;';
     const vid = document.createElement('video');
     vid.src = blobUrl;
     vid.muted = true;
@@ -644,7 +644,7 @@ function openEraseModal() {
     vid.preload = 'auto';
     vid.setAttribute('playsinline', '');
     vid.setAttribute('webkit-playsinline', '');
-    vid.style.cssText = 'display:block;width:100%;height:auto;max-height:70vh;background:#000;';
+    vid.style.cssText = 'display:block;width:100%;height:auto;max-height:82vh;background:#000;';
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;';
     // Hidden warning we'll surface only if the browser can't decode the
