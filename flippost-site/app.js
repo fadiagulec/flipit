@@ -579,7 +579,7 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
 // modal where the user can drag rectangles over a video preview to mark
 // watermarks / handles / logos. Selected boxes are sent to the Railway
 // /erase-region endpoint which runs ffmpeg's delogo filter over each.
-const RAILWAY_ERASE_URL = 'https://web-production-8afc3.up.railway.app/erase-region';
+const RAILWAY_ERASE_URL = '/.netlify/functions/erase-region-video';
 
 function showEraseAreasButton() {
     const host = document.getElementById('errorMessage');
