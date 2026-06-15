@@ -34,6 +34,7 @@
             <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
             <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
             <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
+            <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
         </div>
 
         <!-- Tab 1: URL Extract & Twist -->
@@ -255,6 +256,28 @@
                 </div>
             </div>
             <div id="imgResultsContainer"></div>
+        </div>
+
+        <!-- Tab 7: Eraser — upload any video, draw boxes over watermarks/handles -->
+        <div id="eraser-tab" class="tab-content">
+            <div class="input-section">
+                <div style="text-align:center;margin-bottom:10px;">
+                    <h3 style="margin:0 0 6px;font-size:20px;color:#1a1a2e;">🎯 Watermark & Handle Eraser</h3>
+                    <p style="margin:0;color:#666;font-size:14px;line-height:1.5;">
+                        Upload any video, drag boxes over what you want gone (handles, logos, captions, names), and download the cleaned version.
+                    </p>
+                </div>
+
+                <label for="eraserFile" id="eraserDrop" style="display:block;cursor:pointer;border:2px dashed #0d6e66;border-radius:14px;background:#f7fbfa;padding:36px 20px;text-align:center;transition:background 0.2s;">
+                    <div style="font-size:42px;line-height:1;">📤</div>
+                    <div style="margin-top:8px;font-weight:700;color:#0d6e66;font-size:16px;">Tap to choose a video</div>
+                    <div style="margin-top:4px;font-size:13px;color:#888;">or drag a file here · MP4 / MOV / WebM · up to ~18 MB</div>
+                    <input type="file" id="eraserFile" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none;" />
+                </label>
+
+                <div id="eraserStatus" style="margin-top:12px;text-align:center;font-size:14px;color:#555;min-height:20px;"></div>
+            </div>
+            <div id="eraserResultsContainer"></div>
         </div>
     </main>
 

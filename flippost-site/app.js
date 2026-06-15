@@ -450,6 +450,87 @@ async function forceDownload(mediaUrl, filename) {
 
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
+// ── ERASER TAB: upload a video file directly, no URL needed ───────────
+// Same draw-to-erase modal as the post-download flow — we just feed it
+// the uploaded file instead of a Railway-returned blob.
+(function wireEraserTab() {
+    const fileInput = document.getElementById('eraserFile');
+    const drop = document.getElementById('eraserDrop');
+    const status = document.getElementById('eraserStatus');
+    if (!fileInput || !drop || !status) return;
+
+    const MAX_BYTES = 18 * 1024 * 1024; // matches the Railway endpoint cap
+
+    function setStatus(msg, ok) {
+        status.textContent = msg || '';
+        status.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
+    }
+
+    async function handleFile(file) {
+        if (!file) return;
+        if (!/^video\//i.test(file.type) && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
+            setStatus('That doesn\'t look like a video file. Try MP4, MOV, or WebM.', false);
+            return;
+        }
+        if (file.size > MAX_BYTES) {
+            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use a clip under 18 MB. (Trim it in your phone\'s Photos app, or screen-record a shorter section.)`, false);
+            return;
+        }
+        setStatus('⏳ Loading video…', null);
+        try {
+            const buf = await file.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            // Sniff so the modal player gets the right MIME (some Android
+            // exports report video/* with no specific subtype).
+            const sniffed = sniffMediaType(bytes);
+            const mime = sniffed ? sniffed.mime : (file.type || 'video/mp4');
+            const ext = sniffed ? sniffed.ext : '.mp4';
+            // Chunked base64 encode — atob/btoa choke on 18MB strings on
+            // some mobile browsers, so we encode 64KB at a time.
+            let binStr = '';
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+                binStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            const base64 = btoa(binStr);
+            const baseName = (file.name || 'eraser-input').replace(/\.[a-z0-9]{2,4}$/i, '');
+            window._lastDownloadedVideo = { base64, mime, ext, filename: baseName + ext };
+            setStatus(`✅ Loaded ${(file.size/1048576).toFixed(1)} MB · opening eraser…`, true);
+            openEraseModal();
+        } catch (err) {
+            console.error('Eraser file load failed:', err);
+            setStatus('❌ Could not read that file. Try a different one.', false);
+        }
+    }
+
+    fileInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        // Reset value so picking the same file twice re-fires change.
+        fileInput.value = '';
+        handleFile(f);
+    });
+
+    // Drag & drop support (no-op on touch devices, harmless).
+    ['dragenter', 'dragover'].forEach((ev) => {
+        drop.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            drop.style.background = '#e8f4f3';
+        });
+    });
+    ['dragleave', 'drop'].forEach((ev) => {
+        drop.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            drop.style.background = '#f7fbfa';
+        });
+    });
+    drop.addEventListener('drop', (e) => {
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        handleFile(f);
+    });
+})();
+
 // ── ERASE AREAS (advanced watermark removal) ──────────────────────────
 // After a Railway base64 download succeeds, surface a button that opens a
 // modal where the user can drag rectangles over a video preview to mark
