@@ -466,7 +466,10 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
         status.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
     }
 
-    const RAILWAY_PREPARE_URL = 'https://web-production-8afc3.up.railway.app/prepare-eraser';
+    // Same-origin proxy → Railway. Going through Netlify Functions avoids
+    // browser-side failures ("Failed to fetch") that happen when a network
+    // or extension blocks *.up.railway.app directly.
+    const RAILWAY_PREPARE_URL = '/.netlify/functions/transcode-eraser-video';
 
     async function handleFile(file) {
         if (!file) return;
