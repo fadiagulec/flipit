@@ -499,21 +499,26 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
             setStatus('⏳ Converting video for preview (this takes 5–15s, normal)…', null);
             let previewBase64 = rawBase64;
             let previewMime = file.type || 'video/mp4';
+            let transcoded = false;
+            let transcodeErr = '';
             try {
                 const resp = await fetch(RAILWAY_PREPARE_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ videoData: rawBase64 })
                 });
-                const data = await resp.json();
+                const data = await resp.json().catch(() => ({}));
                 if (resp.ok && data.success && data.videoData) {
                     previewBase64 = data.videoData;
                     previewMime = data.mime || 'video/mp4';
+                    transcoded = true;
                 } else {
-                    console.warn('Transcode failed, using original:', data.error);
+                    transcodeErr = data.error || ('HTTP ' + resp.status);
+                    console.warn('Transcode failed, using original:', transcodeErr, data.detail || '');
                 }
             } catch (xErr) {
-                console.warn('Transcode request failed, using original:', xErr.message);
+                transcodeErr = xErr.message || 'network error';
+                console.warn('Transcode request failed, using original:', transcodeErr);
             }
 
             window._lastDownloadedVideo = {
@@ -522,7 +527,15 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
                 ext: '.mp4',
                 filename: baseName + '.mp4'
             };
-            setStatus(`✅ Ready · opening eraser…`, true);
+            if (transcoded) {
+                setStatus(`✅ Converted to H.264 · opening eraser…`, true);
+            } else {
+                // Surface the transcode failure so the user knows the
+                // preview-may-be-black overlay is BECAUSE we couldn't convert,
+                // not because we never tried. Open the modal anyway — they
+                // can still erase blind, or switch browsers.
+                setStatus(`⚠️ Couldn't convert (${transcodeErr.slice(0, 80)}) — preview may be black, but erasure still works. Opening…`, false);
+            }
             openEraseModal();
         } catch (err) {
             console.error('Eraser file load failed:', err);
