@@ -572,36 +572,60 @@ function openEraseModal() {
     if (modal) modal.remove();
     modal = document.createElement('div');
     modal.id = 'flipit-erase-modal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px;overflow-y:auto;';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px;overflow-y:auto;';
 
     const card = document.createElement('div');
-    card.style.cssText = 'background:#fff;border-radius:14px;padding:16px;max-width:520px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+    // Much wider card so the preview is actually usable. min(96vw, 880px)
+    // gives a near-full-screen workspace on phone AND room for precise
+    // drawing on desktop.
+    card.style.cssText = 'background:#fff;border-radius:14px;padding:18px;width:min(96vw,880px);max-height:96vh;overflow-y:auto;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
 
     const h3 = document.createElement('h3');
     h3.textContent = '🎯 Draw boxes over what to erase';
-    h3.style.cssText = 'font-size:17px;color:#1a1a2e;margin:0 0 4px;';
+    h3.style.cssText = 'font-size:19px;color:#1a1a2e;margin:0 0 4px;';
     const sub = document.createElement('p');
-    sub.innerHTML = 'Tap and drag to draw a box over each watermark, handle, or burned-in name. You can draw multiple. Tap <strong>Erase & Download</strong> when done.';
-    sub.style.cssText = 'color:#555;font-size:13px;margin:0 0 12px;line-height:1.4;';
+    sub.innerHTML = 'Click and drag (or tap-drag on phone) over each watermark, handle, or burned-in name. You can draw multiple boxes. Tap <strong>Erase & Download</strong> when done.';
+    sub.style.cssText = 'color:#555;font-size:14px;margin:0 0 14px;line-height:1.5;';
     card.appendChild(h3);
     card.appendChild(sub);
 
     // Stage: relatively positioned wrapper that holds the video AND the
-    // canvas overlay aligned to the same pixel area.
+    // canvas overlay aligned to the same pixel area. min(800px, 70vh, 96%)
+    // keeps the stage big on desktop while never overflowing on phone.
     const stage = document.createElement('div');
-    stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:380px;background:#000;border-radius:10px;overflow:hidden;';
+    stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:760px;max-height:70vh;background:#000;border-radius:10px;overflow:hidden;';
     const vid = document.createElement('video');
     vid.src = blobUrl;
     vid.muted = true;
     vid.controls = true;
+    vid.preload = 'auto';
     vid.setAttribute('playsinline', '');
     vid.setAttribute('webkit-playsinline', '');
-    vid.style.cssText = 'display:block;width:100%;height:auto;';
+    vid.style.cssText = 'display:block;width:100%;height:auto;max-height:70vh;background:#000;';
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;';
+    // Hidden warning we'll surface only if the browser can't decode the
+    // uploaded file (very common with iPhone HEVC .mov on desktop Chrome).
+    const codecWarn = document.createElement('div');
+    codecWarn.style.cssText = 'display:none;position:absolute;inset:0;background:rgba(0,0,0,0.78);color:#fff;padding:24px;text-align:left;font-size:14px;line-height:1.55;border-radius:10px;overflow-y:auto;';
+    codecWarn.innerHTML = '⚠️ <strong>Preview not available for this video format</strong> '
+        + '<span style="opacity:0.85;">(iPhone HEVC / unsupported codec on this browser).</span>'
+        + '<br><br>You can still erase — but you\'ll need to draw boxes blind, using approximate position. '
+        + 'For a better experience: open this page in <strong>Safari</strong> (which supports HEVC), or '
+        + 'convert your video to <strong>MP4 H.264</strong> first.<br><br>'
+        + '<span style="opacity:0.7;font-size:12px;">The erasure itself runs server-side and works with any format your browser uploaded successfully.</span>';
     stage.appendChild(vid);
     stage.appendChild(canvas);
+    stage.appendChild(codecWarn);
     card.appendChild(stage);
+
+    // Show the warning only when video genuinely failed to load a frame.
+    vid.addEventListener('error', () => { codecWarn.style.display = 'block'; });
+    // Force-seek to first frame so we display SOMETHING instead of black
+    // — many browsers don't auto-render frame 0 from a paused video.
+    vid.addEventListener('loadedmetadata', () => {
+        try { vid.currentTime = 0.05; } catch (e) {}
+    });
 
     const counter = document.createElement('div');
     counter.style.cssText = 'margin-top:8px;font-size:12px;color:#888;';
