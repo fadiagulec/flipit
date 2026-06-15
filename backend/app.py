@@ -349,6 +349,121 @@ def download():
         })
 
 
+@app.route('/erase-region', methods=['POST', 'OPTIONS'])
+def erase_region():
+    """Erase user-selected rectangular regions from an already-downloaded
+    video using ffmpeg's delogo filter, which interpolates surrounding pixels
+    over the box for every frame. Best for static overlays (burned-in handles,
+    logos, captions in fixed positions). Not a true AI inpaint.
+
+    Request body:
+      videoData: base64 string of the original video (.mp4 / .mov / .webm)
+      regions:   list of {x, y, w, h} where each is a 0–1 fraction of the
+                 frame (so 0.05/0.85/0.20/0.06 means: 5% from left, 85% from
+                 top, 20% wide, 6% tall). Max 5 regions.
+
+    Returns: { success, videoData (base64), size_mb, regions_applied }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    video_b64 = (data.get('videoData') or '').strip()
+    regions = data.get('regions') or []
+
+    if not video_b64:
+        return jsonify({'error': 'Missing videoData'}), 400
+    if not isinstance(regions, list) or not regions:
+        return jsonify({'error': 'Missing regions list'}), 400
+
+    # Bound input size — 25MB base64 ≈ 18MB binary. Anything larger should
+    # have been rejected by the upstream Netlify proxy already.
+    if len(video_b64) > 25 * 1024 * 1024:
+        return jsonify({'error': 'Video too large (max ~18MB)'}), 413
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            video_bytes = base64.b64decode(video_b64, validate=False)
+        except Exception:
+            return jsonify({'error': 'Invalid base64'}), 400
+        if len(video_bytes) < 1024:
+            return jsonify({'error': 'Video data too small'}), 400
+
+        in_path = os.path.join(tmpdir, 'in.mp4')
+        out_path = os.path.join(tmpdir, 'out.mp4')
+        with open(in_path, 'wb') as f:
+            f.write(video_bytes)
+
+        # Probe frame dimensions so we can convert each 0–1 region to pixels.
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=width,height', '-of', 'csv=p=0',
+                 in_path],
+                capture_output=True, text=True, timeout=10
+            )
+            if probe.returncode != 0:
+                return jsonify({'error': 'Could not read video metadata'}), 400
+            dims = probe.stdout.strip().split(',')
+            vw, vh = int(dims[0]), int(dims[1])
+        except Exception as e:
+            return jsonify({'error': f'Probe failed: {e}'}), 500
+
+        # Build the delogo filter chain. delogo requires the bounding box to
+        # have at least 1px margin from the frame edge — clamp accordingly.
+        # Cap at 5 regions so a malicious request can't pile up filters.
+        filters = []
+        for r in regions[:5]:
+            try:
+                rx = int(float(r.get('x', 0)) * vw)
+                ry = int(float(r.get('y', 0)) * vh)
+                rw = int(float(r.get('w', 0)) * vw)
+                rh = int(float(r.get('h', 0)) * vh)
+            except (TypeError, ValueError):
+                continue
+            # Clamp box inside frame with 1px margin all around
+            rx = max(1, min(rx, vw - 3))
+            ry = max(1, min(ry, vh - 3))
+            rw = max(2, min(rw, vw - rx - 1))
+            rh = max(2, min(rh, vh - ry - 1))
+            if rw >= 2 and rh >= 2:
+                filters.append(f'delogo=x={rx}:y={ry}:w={rw}:h={rh}')
+
+        if not filters:
+            return jsonify({'error': 'No valid regions after clamping'}), 400
+
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-i', in_path,
+                '-vf', ','.join(filters),
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+                '-c:a', 'copy', '-movflags', '+faststart',
+                out_path,
+            ]
+            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if ff.returncode != 0:
+                print(f'[erase] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+                return jsonify({'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}), 500
+        except FileNotFoundError:
+            return jsonify({'error': 'ffmpeg not installed'}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Processing timed out (try a shorter clip)'}), 408
+
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 1024:
+            return jsonify({'error': 'Erasure produced empty output'}), 500
+
+        with open(out_path, 'rb') as f:
+            out_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'videoData': out_b64,
+            'ext': '.mp4',
+            'size_mb': round(os.path.getsize(out_path) / (1024 * 1024), 2),
+            'regions_applied': len(filters),
+        })
+
+
 # ── Instaloader endpoints ─────────────────────────────────────────────
 def _parse_limit(default=12, cap=24):
     try:

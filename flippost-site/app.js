@@ -450,6 +450,239 @@ async function forceDownload(mediaUrl, filename) {
 
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
+// ── ERASE AREAS (advanced watermark removal) ──────────────────────────
+// After a Railway base64 download succeeds, surface a button that opens a
+// modal where the user can drag rectangles over a video preview to mark
+// watermarks / handles / logos. Selected boxes are sent to the Railway
+// /erase-region endpoint which runs ffmpeg's delogo filter over each.
+const RAILWAY_ERASE_URL = 'https://web-production-8afc3.up.railway.app/erase-region';
+
+function showEraseAreasButton() {
+    const host = document.getElementById('errorMessage');
+    if (!host) return;
+    const existing = document.getElementById('eraseAreasBtn');
+    if (existing) existing.remove();
+    const btn = document.createElement('button');
+    btn.id = 'eraseAreasBtn';
+    btn.type = 'button';
+    btn.textContent = '🎯 Erase watermarks / names from this video';
+    btn.style.cssText = 'display:block;margin:10px auto 0;background:#fff;color:#0d6e66;border:2px solid #0d6e66;padding:10px 18px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;';
+    btn.addEventListener('mouseenter', () => { btn.style.background = '#0d6e66'; btn.style.color = '#fff'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = '#fff'; btn.style.color = '#0d6e66'; });
+    btn.addEventListener('click', openEraseModal);
+    host.parentNode.insertBefore(btn, host.nextSibling);
+}
+
+function openEraseModal() {
+    const v = window._lastDownloadedVideo;
+    if (!v || !v.base64) {
+        showError('No video loaded — download one first.', 'errorMessage');
+        return;
+    }
+
+    // Reconstruct blob URL for preview from the saved base64
+    const byteChars = atob(v.base64);
+    const byteArr = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([byteArr], { type: v.mime });
+    const blobUrl = URL.createObjectURL(blob);
+
+    let modal = document.getElementById('flipit-erase-modal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'flipit-erase-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:12px;overflow-y:auto;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:14px;padding:16px;max-width:520px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+
+    const h3 = document.createElement('h3');
+    h3.textContent = '🎯 Draw boxes over what to erase';
+    h3.style.cssText = 'font-size:17px;color:#1a1a2e;margin:0 0 4px;';
+    const sub = document.createElement('p');
+    sub.innerHTML = 'Tap and drag to draw a box over each watermark, handle, or burned-in name. You can draw multiple. Tap <strong>Erase & Download</strong> when done.';
+    sub.style.cssText = 'color:#555;font-size:13px;margin:0 0 12px;line-height:1.4;';
+    card.appendChild(h3);
+    card.appendChild(sub);
+
+    // Stage: relatively positioned wrapper that holds the video AND the
+    // canvas overlay aligned to the same pixel area.
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:380px;background:#000;border-radius:10px;overflow:hidden;';
+    const vid = document.createElement('video');
+    vid.src = blobUrl;
+    vid.muted = true;
+    vid.controls = true;
+    vid.setAttribute('playsinline', '');
+    vid.setAttribute('webkit-playsinline', '');
+    vid.style.cssText = 'display:block;width:100%;height:auto;';
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;';
+    stage.appendChild(vid);
+    stage.appendChild(canvas);
+    card.appendChild(stage);
+
+    const counter = document.createElement('div');
+    counter.style.cssText = 'margin-top:8px;font-size:12px;color:#888;';
+    counter.textContent = '0 boxes drawn';
+    card.appendChild(counter);
+
+    // Region store: each entry is normalized 0–1 against the video's
+    // intrinsic dimensions (NOT the canvas pixel size), so the backend can
+    // multiply by ffprobe-reported width/height regardless of display zoom.
+    const regions = [];
+    let drawing = null; // { x0, y0 } in canvas-display coords while dragging
+    let dpr = window.devicePixelRatio || 1;
+
+    function sizeCanvasToVideo() {
+        const rect = stage.getBoundingClientRect();
+        // Internal pixel buffer at devicePixelRatio so lines stay crisp on
+        // hi-DPI mobile. Display CSS size is set via the inline style above.
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        redraw();
+    }
+
+    function redraw() {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const rect = stage.getBoundingClientRect();
+        ctx.fillStyle = 'rgba(13,110,102,0.25)';
+        ctx.strokeStyle = '#0d6e66';
+        ctx.lineWidth = 2;
+        for (const r of regions) {
+            const x = r.x * rect.width;
+            const y = r.y * rect.height;
+            const w = r.w * rect.width;
+            const h = r.h * rect.height;
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeRect(x, y, w, h);
+        }
+        if (drawing && drawing.cur) {
+            const x = Math.min(drawing.x0, drawing.cur.x);
+            const y = Math.min(drawing.y0, drawing.cur.y);
+            const w = Math.abs(drawing.cur.x - drawing.x0);
+            const h = Math.abs(drawing.cur.y - drawing.y0);
+            ctx.fillStyle = 'rgba(194,24,91,0.30)';
+            ctx.strokeStyle = '#c2185b';
+            ctx.lineWidth = 2;
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeRect(x, y, w, h);
+        }
+    }
+
+    function evToCanvasCoords(ev) {
+        const rect = stage.getBoundingClientRect();
+        const cx = ev.clientX - rect.left;
+        const cy = ev.clientY - rect.top;
+        return { x: Math.max(0, Math.min(rect.width, cx)), y: Math.max(0, Math.min(rect.height, cy)) };
+    }
+
+    canvas.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        canvas.setPointerCapture(ev.pointerId);
+        const p = evToCanvasCoords(ev);
+        drawing = { x0: p.x, y0: p.y, cur: p };
+        redraw();
+    });
+    canvas.addEventListener('pointermove', (ev) => {
+        if (!drawing) return;
+        drawing.cur = evToCanvasCoords(ev);
+        redraw();
+    });
+    canvas.addEventListener('pointerup', (ev) => {
+        if (!drawing) return;
+        try { canvas.releasePointerCapture(ev.pointerId); } catch (e) {}
+        const rect = stage.getBoundingClientRect();
+        const x = Math.min(drawing.x0, drawing.cur.x) / rect.width;
+        const y = Math.min(drawing.y0, drawing.cur.y) / rect.height;
+        const w = Math.abs(drawing.cur.x - drawing.x0) / rect.width;
+        const h = Math.abs(drawing.cur.y - drawing.y0) / rect.height;
+        drawing = null;
+        // Ignore micro-taps (drag <2% of frame).
+        if (w >= 0.02 && h >= 0.02) {
+            regions.push({ x, y, w, h });
+            counter.textContent = regions.length + ' box' + (regions.length === 1 ? '' : 'es') + ' drawn';
+        }
+        redraw();
+    });
+
+    // Buttons row
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;';
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '↺ Clear';
+    clearBtn.style.cssText = 'flex:1;min-width:80px;padding:12px;background:#fff;color:#555;border:1px solid #ccc;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;';
+    clearBtn.addEventListener('click', () => {
+        regions.length = 0;
+        counter.textContent = '0 boxes drawn';
+        redraw();
+    });
+    const eraseBtn = document.createElement('button');
+    eraseBtn.textContent = '✨ Erase & Download';
+    eraseBtn.style.cssText = 'flex:2;min-width:140px;padding:12px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+    eraseBtn.addEventListener('click', async () => {
+        if (regions.length === 0) {
+            counter.textContent = 'Draw at least one box first.';
+            counter.style.color = '#c2185b';
+            return;
+        }
+        eraseBtn.disabled = true;
+        eraseBtn.textContent = '⏳ Erasing…';
+        try {
+            const resp = await fetch(RAILWAY_ERASE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoData: v.base64, regions })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success || !data.videoData) {
+                throw new Error(data.error || ('Server returned ' + resp.status));
+            }
+            // Build a fresh blob + trigger download
+            const b = atob(data.videoData);
+            const arr = new Uint8Array(b.length);
+            for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i);
+            const cleanBlob = new Blob([arr], { type: 'video/mp4' });
+            const cleanUrl = URL.createObjectURL(cleanBlob);
+            const baseName = (v.filename || 'flipit-video').replace(/\.[a-z0-9]{2,4}$/i, '');
+            triggerSave(cleanUrl, 'video/mp4', baseName + '-erased.mp4');
+            setTimeout(() => URL.revokeObjectURL(cleanUrl), 60000);
+            modal.remove();
+            URL.revokeObjectURL(blobUrl);
+            showSuccess(`✅ Erased ${data.regions_applied} area${data.regions_applied === 1 ? '' : 's'} — clean video downloading (${data.size_mb} MB)`, 'errorMessage');
+        } catch (err) {
+            counter.textContent = '❌ ' + (err.message || 'Erase failed');
+            counter.style.color = '#c2185b';
+            eraseBtn.disabled = false;
+            eraseBtn.textContent = '✨ Erase & Download';
+        }
+    });
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Cancel';
+    closeBtn.style.cssText = 'flex:1;min-width:80px;padding:12px;background:#fff;color:#888;border:1px solid #ddd;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;';
+    closeBtn.addEventListener('click', () => { modal.remove(); URL.revokeObjectURL(blobUrl); });
+    btnRow.appendChild(clearBtn);
+    btnRow.appendChild(eraseBtn);
+    btnRow.appendChild(closeBtn);
+    card.appendChild(btnRow);
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+
+    // Wait for video metadata so we can size the canvas to match the
+    // displayed video element (which has its own intrinsic aspect ratio).
+    if (vid.readyState >= 1) {
+        sizeCanvasToVideo();
+    } else {
+        vid.addEventListener('loadedmetadata', sizeCanvasToVideo, { once: true });
+    }
+    window.addEventListener('resize', sizeCanvasToVideo);
+    modal.addEventListener('remove', () => window.removeEventListener('resize', sizeCanvasToVideo));
+}
+
 async function handleDownload() {
     const urlInput = document.getElementById('urlInput');
     const url = urlInput.value.trim();
@@ -463,13 +696,11 @@ async function handleDownload() {
     btn.disabled = true;
     btn.textContent = '\u23F3 Finding download link...';
 
-    const removeWatermark = !!(document.getElementById('removeWatermarkChk') && document.getElementById('removeWatermarkChk').checked);
-
     try {
         const res = await fetch(DOWNLOAD_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, removeWatermark })
+            body: JSON.stringify({ url })
         });
 
         const data = await res.json();
@@ -501,6 +732,10 @@ async function handleDownload() {
                 } else {
                     showSuccess(`✅ Video download started! (${(byteArr.length / 1048576).toFixed(1)} MB ${ext})`, 'errorMessage');
                 }
+                // Stash the raw base64 + ext so the "Erase areas" button can
+                // re-process this exact clip without re-downloading from IG.
+                window._lastDownloadedVideo = { base64: data.videoData, mime, ext, filename: finalName };
+                showEraseAreasButton();
             } catch (e) {
                 console.error('Video decode failed:', e);
                 showError('❌ Could not save video. The file may be corrupted — try a shorter clip.', 'errorMessage');
