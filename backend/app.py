@@ -349,6 +349,87 @@ def download():
         })
 
 
+@app.route('/prepare-eraser', methods=['POST', 'OPTIONS'])
+def prepare_eraser():
+    """Transcode any uploaded video to H.264 MP4 so it actually previews in
+    the browser. iPhone .mov files are HEVC, which Safari plays but Chrome
+    desktop / Firefox refuse to decode in a <video> tag — leaving the eraser
+    modal black. By re-encoding here, the user gets a usable preview no
+    matter what format they uploaded.
+
+    Request:  POST { videoData: base64 }
+    Response: { success, videoData (base64 H.264 MP4), size_mb }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    video_b64 = (data.get('videoData') or '').strip()
+    if not video_b64:
+        return jsonify({'error': 'Missing videoData'}), 400
+    if len(video_b64) > 25 * 1024 * 1024:
+        return jsonify({'error': 'Video too large (max ~18MB)'}), 413
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            video_bytes = base64.b64decode(video_b64, validate=False)
+        except Exception:
+            return jsonify({'error': 'Invalid base64'}), 400
+        if len(video_bytes) < 1024:
+            return jsonify({'error': 'Video data too small'}), 400
+
+        in_path = os.path.join(tmpdir, 'in.bin')
+        out_path = os.path.join(tmpdir, 'out.mp4')
+        with open(in_path, 'wb') as f:
+            f.write(video_bytes)
+
+        try:
+            ff = subprocess.run(
+                [
+                    'ffmpeg', '-y', '-i', in_path,
+                    # Force H.264 baseline-ish profile for max browser
+                    # compatibility. veryfast keeps the transcode under ~10s
+                    # for typical Reel-length clips.
+                    '-c:v', 'libx264',
+                    '-profile:v', 'high',
+                    '-pix_fmt', 'yuv420p',
+                    '-preset', 'veryfast',
+                    '-crf', '23',
+                    # If incoming audio is AAC we copy, otherwise re-encode
+                    # so the MP4 muxer doesn't choke on weird audio codecs.
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    # Faststart lets the <video> element seek before the full
+                    # file downloads — important for the auto-seek-to-frame-0
+                    # behaviour in the eraser modal.
+                    '-movflags', '+faststart',
+                    out_path,
+                ],
+                capture_output=True, text=True, timeout=45
+            )
+            if ff.returncode != 0:
+                print(f'[prepare] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+                return jsonify({'error': 'Transcode failed', 'detail': (ff.stderr or '')[-200:]}), 500
+        except FileNotFoundError:
+            return jsonify({'error': 'ffmpeg not installed'}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Transcode timed out (try a shorter clip)'}), 408
+
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 1024:
+            return jsonify({'error': 'Transcode produced empty output'}), 500
+
+        with open(out_path, 'rb') as f:
+            out_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'videoData': out_b64,
+            'mime': 'video/mp4',
+            'ext': '.mp4',
+            'size_mb': round(os.path.getsize(out_path) / (1024 * 1024), 2),
+        })
+
+
 @app.route('/erase-region', methods=['POST', 'OPTIONS'])
 def erase_region():
     """Erase user-selected rectangular regions from an already-downloaded

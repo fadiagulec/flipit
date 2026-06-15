@@ -466,6 +466,8 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
         status.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
     }
 
+    const RAILWAY_PREPARE_URL = 'https://web-production-8afc3.up.railway.app/prepare-eraser';
+
     async function handleFile(file) {
         if (!file) return;
         if (!/^video\//i.test(file.type) && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
@@ -476,15 +478,10 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
             setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use a clip under 18 MB. (Trim it in your phone\'s Photos app, or screen-record a shorter section.)`, false);
             return;
         }
-        setStatus('⏳ Loading video…', null);
+        setStatus('⏳ Reading video…', null);
         try {
             const buf = await file.arrayBuffer();
             const bytes = new Uint8Array(buf);
-            // Sniff so the modal player gets the right MIME (some Android
-            // exports report video/* with no specific subtype).
-            const sniffed = sniffMediaType(bytes);
-            const mime = sniffed ? sniffed.mime : (file.type || 'video/mp4');
-            const ext = sniffed ? sniffed.ext : '.mp4';
             // Chunked base64 encode — atob/btoa choke on 18MB strings on
             // some mobile browsers, so we encode 64KB at a time.
             let binStr = '';
@@ -492,10 +489,40 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
             for (let i = 0; i < bytes.length; i += CHUNK) {
                 binStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
             }
-            const base64 = btoa(binStr);
+            const rawBase64 = btoa(binStr);
             const baseName = (file.name || 'eraser-input').replace(/\.[a-z0-9]{2,4}$/i, '');
-            window._lastDownloadedVideo = { base64, mime, ext, filename: baseName + ext };
-            setStatus(`✅ Loaded ${(file.size/1048576).toFixed(1)} MB · opening eraser…`, true);
+
+            // ALWAYS transcode through Railway before opening the modal.
+            // iPhone .mov is HEVC which desktop Chrome/Firefox can't decode
+            // in <video>, so without this step the preview is black on every
+            // non-Safari browser. ffmpeg → H.264 MP4 plays everywhere.
+            setStatus('⏳ Converting video for preview (this takes 5–15s, normal)…', null);
+            let previewBase64 = rawBase64;
+            let previewMime = file.type || 'video/mp4';
+            try {
+                const resp = await fetch(RAILWAY_PREPARE_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoData: rawBase64 })
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success && data.videoData) {
+                    previewBase64 = data.videoData;
+                    previewMime = data.mime || 'video/mp4';
+                } else {
+                    console.warn('Transcode failed, using original:', data.error);
+                }
+            } catch (xErr) {
+                console.warn('Transcode request failed, using original:', xErr.message);
+            }
+
+            window._lastDownloadedVideo = {
+                base64: previewBase64,
+                mime: previewMime,
+                ext: '.mp4',
+                filename: baseName + '.mp4'
+            };
+            setStatus(`✅ Ready · opening eraser…`, true);
             openEraseModal();
         } catch (err) {
             console.error('Eraser file load failed:', err);
