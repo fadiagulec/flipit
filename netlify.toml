@@ -94,5 +94,10 @@
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src https://www.instagram.com https://www.youtube.com https://www.tiktok.com https://www.facebook.com https://platform.twitter.com https://player.vimeo.com; frame-ancestors 'none'"
+    # media-src 'self' blob: — required so the Eraser modal's <video> element
+    # can load the transcoded MP4 from a blob: URL. Without this, the browser
+    # blocks the load and fires an error event that we used to mis-report as
+    # "Preview not available for this video format (HEVC)". Same fix for
+    # the post-download eraser flow.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; frame-src https://www.instagram.com https://www.youtube.com https://www.tiktok.com https://www.facebook.com https://platform.twitter.com https://player.vimeo.com; frame-ancestors 'none'"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
