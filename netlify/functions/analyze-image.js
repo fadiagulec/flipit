@@ -81,6 +81,8 @@ exports.handler = __wrapErr(async (event) => {
     else if (/request too large|over.{0,5}limit/i.test(msg)) { userMsg = 'Image too large for Claude — try a smaller post.'; statusCode = 413; }
     else if (/rate.?limit/i.test(msg)) { userMsg = 'Hit the AI rate limit — wait 60 seconds and try again.'; statusCode = 429; }
     else if (/can't generate a recreate prompt/i.test(msg)) { userMsg = msg; statusCode = 422; }
+    else if (/couldn.?t read this image/i.test(msg)) { userMsg = msg; statusCode = 422; }
+    else if (/non-image data/i.test(msg)) { userMsg = "Couldn't fetch this image (the source returned a login or block page). Try a different post."; statusCode = 502; }
     else if (/Claude API/i.test(msg)) { userMsg = 'AI service error: ' + msg.slice(0, 120); statusCode = 502; }
     else if (/Image fetch HTTP/i.test(msg)) { userMsg = 'Could not fetch this image (the source may be private or expired).'; statusCode = 502; }
     else if (/empty body/i.test(msg)) { userMsg = 'The image source returned empty data.'; statusCode = 502; }
@@ -117,14 +119,24 @@ async function fetchImageAsBase64(imageUrl) {
   const buf = await res.arrayBuffer();
   if (!buf || buf.byteLength < 100) throw new Error('Image fetch returned empty body');
 
-  // Sniff media type from magic bytes — header from upstream is unreliable
+  // Sniff media type from magic bytes — header from upstream is unreliable.
+  // CRITICAL: if no magic byte matches, we throw. Previously we defaulted to
+  // image/jpeg, which meant HTML error pages (Instagram login redirect,
+  // "rate limited" page, expired-token JSON) got sent to Claude tagged as
+  // JPEG. Claude then hallucinated a plausible image that has nothing to
+  // do with the user's post — exact "complete different image" symptom.
   const bytes = new Uint8Array(buf);
-  let mediaType = 'image/jpeg';
+  let mediaType = null;
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) mediaType = 'image/png';
   else if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) mediaType = 'image/gif';
   else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
            bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) mediaType = 'image/webp';
   else if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) mediaType = 'image/jpeg';
+  if (!mediaType) {
+    // Show a snippet of what we got so the logs make the failure mode obvious.
+    const head = Buffer.from(buf.slice(0, 80)).toString('utf8').replace(/\s+/g, ' ').slice(0, 80);
+    throw new Error('Image fetch returned non-image data (likely a login or block page). Head: ' + JSON.stringify(head));
+  }
 
   // Anthropic API has a strict per-message payload cap. Empirically images
   // bigger than ~3.5 MB binary (~4.7 MB base64) start triggering generic
@@ -142,24 +154,22 @@ async function fetchImageAsBase64(imageUrl) {
 async function analyzeImage(imageUrl, slideNumber) {
   // Fetch first, send as base64 — works even when Anthropic can't reach
   // the source URL (Instagram CDN tokens, expired Twitter URLs, etc.).
-  let imagePayload;
-  try {
-    const fetched = await fetchImageAsBase64(imageUrl);
-    imagePayload = {
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: fetched.mediaType,
-        data: fetched.base64
-      }
-    };
-  } catch (fetchErr) {
-    console.warn('Server-side fetch failed, falling back to URL source:', fetchErr.message);
-    imagePayload = {
-      type: 'image',
-      source: { type: 'url', url: imageUrl }
-    };
-  }
+  //
+  // NO silent URL fallback. Previously, if server-side fetch failed we
+  // passed the raw URL to Claude. Anthropic's servers usually can't fetch
+  // Instagram CDN tokens either, so Claude saw nothing and hallucinated a
+  // "plausible" image. That's exactly the "wrong image" symptom. Better
+  // to fail fast with a real error so the user knows the source was
+  // unreachable, not show them a confidently-wrong prompt.
+  const fetched = await fetchImageAsBase64(imageUrl);
+  const imagePayload = {
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: fetched.mediaType,
+      data: fetched.base64
+    }
+  };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -170,7 +180,11 @@ async function analyzeImage(imageUrl, slideNumber) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
+      max_tokens: 1500,
+      // Vision describe-faithfully task. Default temp (1.0) lets the model
+      // invent details when the image is unclear. 0.3 keeps it pinned to
+      // what's actually visible.
+      temperature: 0.3,
       messages: [
         {
           role: 'user',
@@ -185,6 +199,11 @@ ABSOLUTE RULES:
 - BANNED phrases: "stylish person", "casual clothing", "modern setting", "lifestyle photo", "beautiful lighting", "vibrant colors", "aesthetic vibe", "cozy atmosphere", or anything else that could describe 10,000 different images. If you catch yourself writing one of these, replace it with the specific visible detail.
 - Be concrete. "A woman with shoulder-length chestnut-brown hair, parted on the left, wearing a cream chunky cable-knit sweater" — NOT "a stylish woman in casual wear".
 - If a detail is unclear, describe what you DO see (e.g. "a logo on the mug, partially obscured, appearing to read 'STAR...'") rather than guessing or omitting.
+
+UNREADABLE-IMAGE PROTOCOL — READ THIS BEFORE WRITING ANYTHING:
+- If the image is solid color, blank, mostly noise, a broken-image icon, a login or error page, a screenshot of an app chrome rather than visual content, or otherwise contains no recognizable photographic subject — DO NOT make up a prompt.
+- Instead, output literally this string and nothing else: \`IMAGE_UNREADABLE\`
+- It is FAR better to refuse than to hallucinate a confident description of an image that isn't really there. We would rather show the user "couldn't read this image" than a beautiful prompt for the wrong picture.
 
 SAFETY (the recreate prompt is going to social media — keep it appropriate):
 - If the source image contains scars, wounds, blood, self-harm marks, medication, IV drips, or other clinical/distressing content, DO NOT include those details. Describe the rest of the scene and SKIP the harmful element entirely (don't mention scars/wrists/blood). The recreated image must be social-media-safe even if the source isn't.
@@ -236,7 +255,13 @@ Begin.`
   }
 
   if (data.content && data.content[0] && data.content[0].text) {
-    return data.content[0].text.trim();
+    const text = data.content[0].text.trim();
+    // Model self-refused because the image is blank, an error page, or
+    // otherwise has no real subject. Surface to UI as a clean error.
+    if (/^IMAGE_UNREADABLE\b/i.test(text)) {
+      throw new Error("Couldn't read this image (looks blank or unavailable). Try a different post.");
+    }
+    return text;
   }
 
   throw new Error('No response from Claude');
