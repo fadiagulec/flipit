@@ -264,15 +264,15 @@
                 <div style="text-align:center;margin-bottom:10px;">
                     <h3 style="margin:0 0 6px;font-size:20px;color:#1a1a2e;">🎯 Watermark & Handle Eraser</h3>
                     <p style="margin:0;color:#666;font-size:14px;line-height:1.5;">
-                        Upload any video, drag boxes over what you want gone (handles, logos, captions, names), and download the cleaned version.
+                        Upload any video or image, drag boxes over what you want gone (handles, logos, captions, names), and download the cleaned version.
                     </p>
                 </div>
 
                 <label for="eraserFile" id="eraserDrop" style="display:block;cursor:pointer;border:2px dashed #0d6e66;border-radius:14px;background:#f7fbfa;padding:36px 20px;text-align:center;transition:background 0.2s;">
                     <div style="font-size:42px;line-height:1;">📤</div>
-                    <div style="margin-top:8px;font-weight:700;color:#0d6e66;font-size:16px;">Tap to choose a video</div>
-                    <div style="margin-top:4px;font-size:13px;color:#888;">or drag a file here · MP4 / MOV / WebM · up to ~18 MB</div>
-                    <input type="file" id="eraserFile" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none;" />
+                    <div style="margin-top:8px;font-weight:700;color:#0d6e66;font-size:16px;">Tap to choose a video or image</div>
+                    <div style="margin-top:4px;font-size:13px;color:#888;">or drag a file here · MP4 / MOV / WebM / JPG / PNG / WebP · up to ~18 MB</div>
+                    <input type="file" id="eraserFile" accept="video/mp4,video/quicktime,video/webm,video/*,image/jpeg,image/png,image/webp,image/*" style="display:none;" />
                 </label>
 
                 <div id="eraserStatus" style="margin-top:12px;text-align:center;font-size:14px;color:#555;min-height:20px;"></div>
@@ -287,6 +287,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=eraseproxy2"></script>
+    <script src="app.js?v=eraseimg1"></script>
 </body>
 </html>

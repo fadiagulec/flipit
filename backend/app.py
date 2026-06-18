@@ -560,6 +560,129 @@ def erase_region():
         })
 
 
+@app.route('/erase-region-image', methods=['POST', 'OPTIONS'])
+def erase_region_image():
+    """Image counterpart to /erase-region. Same input shape, same delogo
+    pipeline, but operates on a single still frame. Output is always PNG
+    so transparency / lossless quality survives the round-trip; if the
+    input was JPEG the client can re-encode after download.
+
+    Request body:
+      imageData: base64 string of the input image (.jpg / .png / .webp)
+      regions:   [{x, y, w, h}, …] — same normalized 0–1 schema as video
+    Returns: { success, imageData (base64 PNG), size_mb, regions_applied }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    image_b64 = (data.get('imageData') or '').strip()
+    regions = data.get('regions') or []
+
+    if not image_b64:
+        return jsonify({'error': 'Missing imageData'}), 400
+    if not isinstance(regions, list) or not regions:
+        return jsonify({'error': 'Missing regions list'}), 400
+
+    # 12MB base64 ≈ 9MB binary — images don't need the same headroom video does.
+    if len(image_b64) > 12 * 1024 * 1024:
+        return jsonify({'error': 'Image too large (max ~9MB)'}), 413
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            image_bytes = base64.b64decode(image_b64, validate=False)
+        except Exception:
+            return jsonify({'error': 'Invalid base64'}), 400
+        if len(image_bytes) < 256:
+            return jsonify({'error': 'Image data too small'}), 400
+
+        # Sniff format from magic bytes — same idea as analyze-image.js.
+        # Default to .jpg if we can't tell; ffmpeg auto-detects on decode.
+        ext = '.jpg'
+        if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+            ext = '.png'
+        elif image_bytes[:3] == b'GIF':
+            ext = '.gif'
+        elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+            ext = '.webp'
+        elif image_bytes[:3] == b'\xff\xd8\xff':
+            ext = '.jpg'
+
+        in_path = os.path.join(tmpdir, 'in' + ext)
+        out_path = os.path.join(tmpdir, 'out.png')
+        with open(in_path, 'wb') as f:
+            f.write(image_bytes)
+
+        # Probe dimensions via ffprobe (works on stills too).
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=width,height',
+                 '-of', 'csv=p=0:s=,', in_path],
+                capture_output=True, text=True, timeout=10
+            )
+            dims = probe.stdout.strip().split(',')
+            vw, vh = int(dims[0]), int(dims[1])
+        except Exception as e:
+            return jsonify({'error': f'Probe failed: {e}'}), 500
+
+        # Same delogo filter chain as the video endpoint — padded box + raised
+        # band to blend stains into the background texture.
+        PAD = 8
+        BAND_TARGET = 12
+        filters = []
+        for r in regions[:5]:
+            try:
+                rx = int(float(r.get('x', 0)) * vw)
+                ry = int(float(r.get('y', 0)) * vh)
+                rw = int(float(r.get('w', 0)) * vw)
+                rh = int(float(r.get('h', 0)) * vh)
+            except (TypeError, ValueError):
+                continue
+            rx -= PAD; ry -= PAD; rw += 2 * PAD; rh += 2 * PAD
+            rx = max(1, min(rx, vw - 3))
+            ry = max(1, min(ry, vh - 3))
+            rw = max(2, min(rw, vw - rx - 1))
+            rh = max(2, min(rh, vh - ry - 1))
+            if rw >= 2 and rh >= 2:
+                band = max(1, min(BAND_TARGET, min(rw, rh) // 2 - 1))
+                filters.append(f'delogo=x={rx}:y={ry}:w={rw}:h={rh}:band={band}')
+
+        if not filters:
+            return jsonify({'error': 'No valid regions after clamping'}), 400
+
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-i', in_path,
+                '-vf', ','.join(filters),
+                '-frames:v', '1',
+                out_path,
+            ]
+            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if ff.returncode != 0:
+                print(f'[erase-image] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+                return jsonify({'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}), 500
+        except FileNotFoundError:
+            return jsonify({'error': 'ffmpeg not installed'}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Processing timed out'}), 408
+
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 256:
+            return jsonify({'error': 'Erasure produced empty output'}), 500
+
+        with open(out_path, 'rb') as f:
+            out_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'imageData': out_b64,
+            'ext': '.png',
+            'mime': 'image/png',
+            'size_mb': round(os.path.getsize(out_path) / (1024 * 1024), 2),
+            'regions_applied': len(filters),
+        })
+
+
 # ── Instaloader endpoints ─────────────────────────────────────────────
 def _parse_limit(default=12, cap=24):
     try:

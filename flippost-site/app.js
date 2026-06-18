@@ -473,15 +473,17 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
 
     async function handleFile(file) {
         if (!file) return;
-        if (!/^video\//i.test(file.type) && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
-            setStatus('That doesn\'t look like a video file. Try MP4, MOV, or WebM.', false);
+        const isImage = /^image\//i.test(file.type) || /\.(jpg|jpeg|png|webp|gif)$/i.test(file.name);
+        const isVideo = /^video\//i.test(file.type) || /\.(mp4|mov|m4v|webm)$/i.test(file.name);
+        if (!isImage && !isVideo) {
+            setStatus('That doesn\'t look like a video or image. Try MP4/MOV/WebM, or JPG/PNG/WebP.', false);
             return;
         }
         if (file.size > MAX_BYTES) {
-            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use a clip under 18 MB. (Trim it in your phone\'s Photos app, or screen-record a shorter section.)`, false);
+            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use one under 18 MB.`, false);
             return;
         }
-        setStatus('⏳ Reading video…', null);
+        setStatus(isImage ? '⏳ Reading image…' : '⏳ Reading video…', null);
         try {
             const buf = await file.arrayBuffer();
             const bytes = new Uint8Array(buf);
@@ -495,6 +497,25 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
             const rawBase64 = btoa(binStr);
             const baseName = (file.name || 'eraser-input').replace(/\.[a-z0-9]{2,4}$/i, '');
 
+            // ── IMAGE BRANCH ────────────────────────────────────────
+            // Images skip the transcode step entirely — every browser
+            // already knows how to render JPG/PNG/WebP/GIF, so we go
+            // straight to the modal with the raw bytes.
+            if (isImage) {
+                const mime = file.type || 'image/jpeg';
+                window._lastDownloadedVideo = {
+                    base64: rawBase64,
+                    mime,
+                    ext: '.png',
+                    filename: baseName + '.png',
+                    kind: 'image'
+                };
+                setStatus('✅ Image loaded · opening eraser…', true);
+                openEraseModal();
+                return;
+            }
+
+            // ── VIDEO BRANCH ────────────────────────────────────────
             // ALWAYS transcode through Railway before opening the modal.
             // iPhone .mov is HEVC which desktop Chrome/Firefox can't decode
             // in <video>, so without this step the preview is black on every
@@ -528,15 +549,12 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
                 base64: previewBase64,
                 mime: previewMime,
                 ext: '.mp4',
-                filename: baseName + '.mp4'
+                filename: baseName + '.mp4',
+                kind: 'video'
             };
             if (transcoded) {
                 setStatus(`✅ Converted to H.264 · opening eraser…`, true);
             } else {
-                // Surface the transcode failure so the user knows the
-                // preview-may-be-black overlay is BECAUSE we couldn't convert,
-                // not because we never tried. Open the modal anyway — they
-                // can still erase blind, or switch browsers.
                 setStatus(`⚠️ Couldn't convert (${transcodeErr.slice(0, 80)}) — preview may be black, but erasure still works. Opening…`, false);
             }
             openEraseModal();
@@ -635,15 +653,22 @@ function openEraseModal() {
     // Stage: relatively positioned wrapper that holds the video AND the
     // canvas overlay aligned to the same pixel area. min(800px, 70vh, 96%)
     // keeps the stage big on desktop while never overflowing on phone.
+    const isImageMode = v.kind === 'image';
     const stage = document.createElement('div');
     stage.style.cssText = 'position:relative;display:inline-block;width:100%;max-width:900px;max-height:82vh;background:#000;border-radius:10px;overflow:hidden;';
-    const vid = document.createElement('video');
+    // Use <img> for images, <video> for videos. Both fill the stage the same
+    // way so the canvas-overlay math below works without branching.
+    const vid = document.createElement(isImageMode ? 'img' : 'video');
     vid.src = blobUrl;
-    vid.muted = true;
-    vid.controls = true;
-    vid.preload = 'auto';
-    vid.setAttribute('playsinline', '');
-    vid.setAttribute('webkit-playsinline', '');
+    if (!isImageMode) {
+        vid.muted = true;
+        vid.controls = true;
+        vid.preload = 'auto';
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('webkit-playsinline', '');
+    } else {
+        vid.alt = 'image to erase';
+    }
     vid.style.cssText = 'display:block;width:100%;height:auto;max-height:82vh;background:#000;';
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair;';
@@ -662,13 +687,14 @@ function openEraseModal() {
     stage.appendChild(codecWarn);
     card.appendChild(stage);
 
-    // Show the warning only when video genuinely failed to load a frame.
     vid.addEventListener('error', () => { codecWarn.style.display = 'block'; });
-    // Force-seek to first frame so we display SOMETHING instead of black
-    // — many browsers don't auto-render frame 0 from a paused video.
-    vid.addEventListener('loadedmetadata', () => {
-        try { vid.currentTime = 0.05; } catch (e) {}
-    });
+    if (!isImageMode) {
+        // Force-seek to first frame so we display SOMETHING instead of black
+        // — many browsers don't auto-render frame 0 from a paused video.
+        vid.addEventListener('loadedmetadata', () => {
+            try { vid.currentTime = 0.05; } catch (e) {}
+        });
+    }
 
     const counter = document.createElement('div');
     counter.style.cssText = 'margin-top:8px;font-size:12px;color:#888;';
@@ -780,27 +806,38 @@ function openEraseModal() {
         eraseBtn.disabled = true;
         eraseBtn.textContent = '⏳ Erasing…';
         try {
-            const resp = await fetch(RAILWAY_ERASE_URL, {
+            // Route to the right endpoint and use the right field names.
+            const endpoint = isImageMode
+                ? '/.netlify/functions/erase-region-image'
+                : RAILWAY_ERASE_URL;
+            const payload = isImageMode
+                ? { imageData: v.base64, regions }
+                : { videoData: v.base64, regions };
+            const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoData: v.base64, regions })
+                body: JSON.stringify(payload)
             });
             const data = await resp.json();
-            if (!resp.ok || !data.success || !data.videoData) {
+            const outField = isImageMode ? 'imageData' : 'videoData';
+            if (!resp.ok || !data.success || !data[outField]) {
                 throw new Error(data.error || ('Server returned ' + resp.status));
             }
-            // Build a fresh blob + trigger download
-            const b = atob(data.videoData);
+            const b = atob(data[outField]);
             const arr = new Uint8Array(b.length);
             for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i);
-            const cleanBlob = new Blob([arr], { type: 'video/mp4' });
+            const outMime = isImageMode ? (data.mime || 'image/png') : 'video/mp4';
+            const outExt = isImageMode ? (data.ext || '.png') : '.mp4';
+            const cleanBlob = new Blob([arr], { type: outMime });
             const cleanUrl = URL.createObjectURL(cleanBlob);
-            const baseName = (v.filename || 'flipit-video').replace(/\.[a-z0-9]{2,4}$/i, '');
-            triggerSave(cleanUrl, 'video/mp4', baseName + '-erased.mp4');
+            const fallbackBase = isImageMode ? 'flipit-image' : 'flipit-video';
+            const baseName = (v.filename || fallbackBase).replace(/\.[a-z0-9]{2,4}$/i, '');
+            triggerSave(cleanUrl, outMime, baseName + '-erased' + outExt);
             setTimeout(() => URL.revokeObjectURL(cleanUrl), 60000);
             modal.remove();
             URL.revokeObjectURL(blobUrl);
-            showSuccess(`✅ Erased ${data.regions_applied} area${data.regions_applied === 1 ? '' : 's'} — clean video downloading (${data.size_mb} MB)`, 'errorMessage');
+            const noun = isImageMode ? 'image' : 'video';
+            showSuccess(`✅ Erased ${data.regions_applied} area${data.regions_applied === 1 ? '' : 's'} — clean ${noun} downloading (${data.size_mb} MB)`, 'errorMessage');
         } catch (err) {
             counter.textContent = '❌ ' + (err.message || 'Erase failed');
             counter.style.color = '#c2185b';
@@ -820,12 +857,17 @@ function openEraseModal() {
     modal.appendChild(card);
     document.body.appendChild(modal);
 
-    // Wait for video metadata so we can size the canvas to match the
-    // displayed video element (which has its own intrinsic aspect ratio).
-    if (vid.readyState >= 1) {
+    // Wait for the media to know its intrinsic dimensions so we can size the
+    // canvas to match. <video> uses loadedmetadata + readyState; <img> uses
+    // load + complete/naturalWidth.
+    const isReady = isImageMode
+        ? (vid.complete && vid.naturalWidth > 0)
+        : (vid.readyState >= 1);
+    const readyEvent = isImageMode ? 'load' : 'loadedmetadata';
+    if (isReady) {
         sizeCanvasToVideo();
     } else {
-        vid.addEventListener('loadedmetadata', sizeCanvasToVideo, { once: true });
+        vid.addEventListener(readyEvent, sizeCanvasToVideo, { once: true });
     }
     window.addEventListener('resize', sizeCanvasToVideo);
     modal.addEventListener('remove', () => window.removeEventListener('resize', sizeCanvasToVideo));
