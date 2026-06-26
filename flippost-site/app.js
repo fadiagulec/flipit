@@ -2422,3 +2422,363 @@ function showSuccess(msg, id) {
         console.warn('autoFlipFromQuery failed:', e);
     }
 })();
+
+// ── BRAND VOICE PROFILES ──────────────────────────────────────────
+// Saved voice presets the creator can switch between. Stored in
+// localStorage. Active voice's description is injected into the Script
+// Rewrite and Image Prompts backend calls as a STYLE input — backend
+// treats it as data, never as instructions.
+(function brandVoiceModule() {
+    const STORAGE_KEY = 'flipit_voices_v1';
+    const ACTIVE_KEY = 'flipit_voices_active_v1';
+    const DEFAULT_VOICES = [
+        { id: 'generic', name: 'Generic', description: 'Clear, direct, professional. No persona — neutral viral copy.' }
+    ];
+
+    function loadVoices() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return DEFAULT_VOICES.slice();
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_VOICES.slice();
+            return parsed;
+        } catch { return DEFAULT_VOICES.slice(); }
+    }
+    function saveVoices(list) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+    }
+    function getActiveId() {
+        try { return localStorage.getItem(ACTIVE_KEY) || 'generic'; } catch { return 'generic'; }
+    }
+    function setActiveId(id) {
+        try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+    }
+    function getActive() {
+        const voices = loadVoices();
+        const id = getActiveId();
+        return voices.find(v => v.id === id) || voices[0];
+    }
+    function getActiveContext() {
+        const v = getActive();
+        if (!v) return '';
+        // Generic voice = pass nothing so the backend uses its default behavior.
+        if (v.id === 'generic') return '';
+        const lines = [];
+        if (v.name) lines.push('Voice name: ' + v.name);
+        if (v.description) lines.push('Description: ' + v.description);
+        return lines.join('\n');
+    }
+
+    function renderInto(host) {
+        host.innerHTML = '';
+        host.style.cssText = 'background:#faf8f5;border:1px solid #e8e4de;border-radius:10px;padding:12px;margin-bottom:14px;';
+
+        const headerRow = document.createElement('div');
+        headerRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;';
+        const label = document.createElement('div');
+        label.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:13px;letter-spacing:0.04em;text-transform:uppercase;';
+        label.textContent = '🎭 Brand Voice';
+        const newBtn = document.createElement('button');
+        newBtn.type = 'button';
+        newBtn.textContent = '+ New voice';
+        newBtn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:6px 12px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+        newBtn.addEventListener('click', () => openVoiceModal(null));
+        headerRow.appendChild(label);
+        headerRow.appendChild(newBtn);
+        host.appendChild(headerRow);
+
+        const chipRow = document.createElement('div');
+        chipRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+        const voices = loadVoices();
+        const activeId = getActiveId();
+        voices.forEach(v => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            const isActive = v.id === activeId;
+            chip.style.cssText = 'padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ' +
+                (isActive ? '#0d6e66' : '#e0dcd5') +
+                ';background:' + (isActive ? '#0d6e66' : '#fff') +
+                ';color:' + (isActive ? '#fff' : '#444') + ';';
+            chip.textContent = v.name;
+            chip.addEventListener('click', () => {
+                setActiveId(v.id);
+                document.querySelectorAll('.brand-voice-bar').forEach(renderInto);
+            });
+            // Right-click / long-press to edit. On mobile, also expose an edit affordance.
+            if (v.id !== 'generic') {
+                chip.title = 'Click to use · double-click to edit';
+                chip.addEventListener('dblclick', (e) => { e.preventDefault(); openVoiceModal(v); });
+            }
+            chipRow.appendChild(chip);
+        });
+        host.appendChild(chipRow);
+
+        const desc = document.createElement('div');
+        desc.style.cssText = 'margin-top:8px;font-size:12px;color:#666;line-height:1.4;';
+        const active = getActive();
+        desc.textContent = active && active.description ? active.description : '';
+        host.appendChild(desc);
+    }
+
+    function openVoiceModal(existing) {
+        // Remove any open modal
+        const old = document.getElementById('flipit-voice-modal');
+        if (old) old.remove();
+        const modal = document.createElement('div');
+        modal.id = 'flipit-voice-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;';
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#fff;border-radius:14px;padding:20px;width:min(94vw,520px);box-shadow:0 20px 60px rgba(0,0,0,0.4);';
+        const h3 = document.createElement('h3');
+        h3.style.cssText = 'margin:0 0 14px;font-size:19px;color:#1a1a2e;';
+        h3.textContent = existing ? '✏️ Edit voice' : '➕ New brand voice';
+        card.appendChild(h3);
+
+        const nameLbl = document.createElement('label');
+        nameLbl.style.cssText = 'display:block;font-size:13px;font-weight:600;color:#444;margin-bottom:4px;';
+        nameLbl.textContent = 'Voice name (short)';
+        card.appendChild(nameLbl);
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.maxLength = 30;
+        nameInput.placeholder = 'e.g. Empower Her';
+        nameInput.value = existing ? existing.name : '';
+        nameInput.style.cssText = 'width:100%;padding:10px;border:1.5px solid #e0dcd5;border-radius:8px;font-size:14px;margin-bottom:14px;box-sizing:border-box;';
+        card.appendChild(nameInput);
+
+        const descLbl = document.createElement('label');
+        descLbl.style.cssText = 'display:block;font-size:13px;font-weight:600;color:#444;margin-bottom:4px;';
+        descLbl.textContent = 'Voice description — tone, audience, signature phrases, what to never say';
+        card.appendChild(descLbl);
+        const descInput = document.createElement('textarea');
+        descInput.rows = 6;
+        descInput.maxLength = 2000;
+        descInput.placeholder = "e.g. Confident female-founder voice. Speaks to ambitious women in their 30s building service businesses. Confronts then invites — never opens with a soft story. Never uses corporate-speak. Signature: 'Here's the part nobody tells you…'";
+        descInput.value = existing ? existing.description : '';
+        descInput.style.cssText = 'width:100%;padding:10px;border:1.5px solid #e0dcd5;border-radius:8px;font-size:14px;line-height:1.5;margin-bottom:14px;box-sizing:border-box;resize:vertical;';
+        card.appendChild(descInput);
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.textContent = '💾 Save';
+        saveBtn.style.cssText = 'flex:1;padding:11px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+        saveBtn.addEventListener('click', () => {
+            const name = nameInput.value.trim().slice(0, 30);
+            const description = descInput.value.trim().slice(0, 2000);
+            if (!name || !description) { alert('Add both a name and a description.'); return; }
+            const voices = loadVoices();
+            if (existing) {
+                const idx = voices.findIndex(v => v.id === existing.id);
+                if (idx >= 0) voices[idx] = { ...existing, name, description };
+            } else {
+                const id = 'v_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+                voices.push({ id, name, description });
+                setActiveId(id);
+            }
+            saveVoices(voices);
+            modal.remove();
+            document.querySelectorAll('.brand-voice-bar').forEach(renderInto);
+        });
+        btnRow.appendChild(saveBtn);
+
+        if (existing && existing.id !== 'generic') {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.textContent = '🗑️ Delete';
+            delBtn.style.cssText = 'padding:11px 14px;background:#fff;color:#c2185b;border:1.5px solid #c2185b;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+            delBtn.addEventListener('click', () => {
+                if (!confirm('Delete this voice?')) return;
+                const voices = loadVoices().filter(v => v.id !== existing.id);
+                saveVoices(voices);
+                if (getActiveId() === existing.id) setActiveId('generic');
+                modal.remove();
+                document.querySelectorAll('.brand-voice-bar').forEach(renderInto);
+            });
+            btnRow.appendChild(delBtn);
+        }
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = 'padding:11px 14px;background:#fff;color:#888;border:1.5px solid #ddd;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+        cancelBtn.addEventListener('click', () => modal.remove());
+        btnRow.appendChild(cancelBtn);
+
+        card.appendChild(btnRow);
+        modal.appendChild(card);
+        document.body.appendChild(modal);
+        setTimeout(() => nameInput.focus(), 50);
+    }
+
+    function renderAll() {
+        document.querySelectorAll('.brand-voice-bar').forEach(renderInto);
+    }
+
+    window.FlipItVoice = { getActive, getActiveContext, renderAll };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderAll);
+    } else {
+        renderAll();
+    }
+})();
+
+// ── VIRALSCORE TAB ────────────────────────────────────────────────
+// Posts caption + platform to /viral-score and renders the scorecard.
+(function viralScoreModule() {
+    const btn = document.getElementById('runScoreBtn');
+    if (!btn) return;
+
+    function colorFor(score) {
+        if (score >= 80) return '#0d6e66';
+        if (score >= 60) return '#d97706';
+        return '#c2185b';
+    }
+    function verdictColor(score10) {
+        if (score10 >= 8) return '#0d6e66';
+        if (score10 >= 6) return '#d97706';
+        return '#c2185b';
+    }
+
+    function renderScorecard(data) {
+        const host = document.getElementById('scoreResultsContainer');
+        host.innerHTML = '';
+
+        const section = document.createElement('div');
+        section.className = 'result-section';
+
+        const ringWrap = document.createElement('div');
+        ringWrap.style.cssText = 'display:flex;justify-content:center;margin-bottom:14px;';
+        const ring = document.createElement('div');
+        const score10 = Math.round(Number(data.score) * 10) / 10;
+        const color = verdictColor(score10);
+        ring.style.cssText = 'width:140px;height:140px;border-radius:50%;border:8px solid ' + color + ';display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff;';
+        const big = document.createElement('div');
+        big.style.cssText = 'font-size:44px;font-weight:800;color:' + color + ';line-height:1;';
+        big.textContent = String(score10);
+        const small = document.createElement('div');
+        small.style.cssText = 'font-size:13px;color:#888;margin-top:2px;';
+        small.textContent = '/10';
+        ring.appendChild(big);
+        ring.appendChild(small);
+        ringWrap.appendChild(ring);
+        section.appendChild(ringWrap);
+
+        const verdict = document.createElement('div');
+        verdict.style.cssText = 'text-align:center;padding:10px;border-radius:10px;background:' + color + '14;color:' + color + ';font-weight:700;font-size:16px;margin-bottom:10px;border:1px solid ' + color + '40;';
+        verdict.textContent = data.verdict || '';
+        section.appendChild(verdict);
+
+        if (data.summary) {
+            const sum = document.createElement('p');
+            sum.style.cssText = 'color:#444;font-size:14px;line-height:1.55;text-align:center;margin:0 8px 16px;';
+            sum.textContent = data.summary;
+            section.appendChild(sum);
+        }
+
+        const dimHeader = document.createElement('h4');
+        dimHeader.style.cssText = 'font-size:15px;color:#1a1a2e;margin:14px 0 10px;';
+        dimHeader.textContent = '📊 Dimension Breakdown';
+        section.appendChild(dimHeader);
+
+        (data.dimensions || []).forEach(dim => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#faf8f5;border:1px solid #e8e4de;border-radius:10px;padding:12px;margin-bottom:10px;';
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+            const lbl = document.createElement('div');
+            lbl.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;';
+            lbl.textContent = dim.label;
+            const num = document.createElement('div');
+            const c = colorFor(dim.score);
+            num.style.cssText = 'font-weight:800;color:' + c + ';font-size:16px;';
+            num.textContent = String(dim.score);
+            row.appendChild(lbl);
+            row.appendChild(num);
+            card.appendChild(row);
+            const bar = document.createElement('div');
+            bar.style.cssText = 'height:6px;background:#e8e4de;border-radius:999px;overflow:hidden;margin-bottom:8px;';
+            const fill = document.createElement('div');
+            fill.style.cssText = 'height:100%;background:' + c + ';width:' + Math.max(0, Math.min(100, dim.score)) + '%;transition:width 0.3s;';
+            bar.appendChild(fill);
+            card.appendChild(bar);
+            if (dim.comment) {
+                const cm = document.createElement('p');
+                cm.style.cssText = 'color:#555;font-size:13px;line-height:1.5;margin:0;';
+                cm.textContent = dim.comment;
+                card.appendChild(cm);
+            }
+            section.appendChild(card);
+        });
+
+        host.appendChild(section);
+    }
+
+    btn.addEventListener('click', async () => {
+        const caption = document.getElementById('scoreCaption').value.trim();
+        const platform = document.getElementById('scorePlatform').value || 'instagram';
+        const hashtags = document.getElementById('scoreHashtags').value.trim();
+        if (!caption || caption.length < 10) {
+            showError('Paste at least 10 characters of caption to score.', 'scoreErrorMessage');
+            return;
+        }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Scoring…';
+        const host = document.getElementById('scoreResultsContainer');
+        host.innerHTML = '<div class="loading">⚡ Reading the post & scoring 6 dimensions…</div>';
+        try {
+            const res = await fetch('/.netlify/functions/viral-score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caption, platform, hashtags })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || ('Server returned ' + res.status));
+            renderScorecard(data);
+        } catch (err) {
+            host.innerHTML = '';
+            showError('❌ ' + (err.message || 'Scoring failed'), 'scoreErrorMessage');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = origText;
+        }
+    });
+})();
+
+// ── PLUMB BRAND VOICE INTO EXISTING FETCHES ───────────────────────
+// Wraps window.fetch ONLY for the two backend functions that take
+// voiceContext (rewrite-script + image-prompts). Adds the active
+// voice's context to the JSON body if not already set. Leaves every
+// other fetch in the app untouched.
+(function plumbVoiceIntoFetches() {
+    const originalFetch = window.fetch;
+    const VOICE_ROUTES = [
+        '/.netlify/functions/rewrite-script',
+        '/.netlify/functions/image-prompts'
+    ];
+    window.fetch = function (input, init) {
+        try {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            if (init && init.method === 'POST' && VOICE_ROUTES.some(r => url.includes(r))) {
+                const ctx = (window.FlipItVoice && window.FlipItVoice.getActiveContext)
+                    ? window.FlipItVoice.getActiveContext()
+                    : '';
+                if (ctx) {
+                    try {
+                        const parsed = JSON.parse(init.body || '{}');
+                        if (typeof parsed === 'object' && parsed && !parsed.voiceContext) {
+                            parsed.voiceContext = ctx;
+                            init = Object.assign({}, init, { body: JSON.stringify(parsed) });
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+        return originalFetch.call(this, input, init);
+    };
+})();

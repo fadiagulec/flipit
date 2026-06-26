@@ -35,6 +35,7 @@
             <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
             <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
             <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
+            <button class="tab-btn" data-tab="score-tab">⚡ ViralScore</button>
         </div>
 
         <!-- Tab 1: URL Extract & Twist -->
@@ -117,6 +118,7 @@
         <!-- Tab 2: Script Rewrite -->
         <div id="script-tab" class="tab-content">
             <div class="input-section">
+                <div class="brand-voice-bar" data-voice-host="script"></div>
                 <div class="input-group">
                     <label for="scriptInput">Paste your script or caption</label>
                     <textarea id="scriptInput" placeholder="Paste any script, caption, or text here and FlipIt will rewrite it with a viral angle and proven hook..." rows="6" maxlength="10000"></textarea>
@@ -150,6 +152,7 @@
 
         <!-- Tab 4: Image Prompts -->
         <div id="imgprompt-tab" class="tab-content">
+            <div class="brand-voice-bar" data-voice-host="imgprompt"></div>
             <div class="niche-grid" id="nicheGrid" role="group" aria-label="Choose your niche">
                 <button type="button" class="niche-card selected" data-niche="mommy" aria-pressed="true">
                     <span class="niche-icon">👩‍👧‍👦</span>
@@ -279,6 +282,41 @@
             </div>
             <div id="eraserResultsContainer"></div>
         </div>
+
+        <!-- Tab 8: ViralScore — score a finished post before publishing -->
+        <div id="score-tab" class="tab-content">
+            <div class="input-section">
+                <div style="text-align:center;margin-bottom:10px;">
+                    <h3 style="margin:0 0 6px;font-size:20px;color:#1a1a2e;">⚡ ViralScore</h3>
+                    <p style="margin:0;color:#666;font-size:14px;line-height:1.5;">
+                        Paste your finished caption and get a 0–10 virality score with specific fixes per dimension — <strong>before</strong> you hit post.
+                    </p>
+                </div>
+                <div class="input-group">
+                    <label for="scorePlatform">Target platform</label>
+                    <select id="scorePlatform">
+                        <option value="instagram">📷 Instagram</option>
+                        <option value="tiktok">🎵 TikTok</option>
+                        <option value="linkedin">💼 LinkedIn</option>
+                        <option value="x">𝕏 X (Twitter)</option>
+                        <option value="youtube">▶️ YouTube</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="scoreCaption">Caption</label>
+                    <textarea id="scoreCaption" placeholder="Paste your post caption here — the version you're about to publish..." rows="6" maxlength="8000"></textarea>
+                </div>
+                <div class="input-group">
+                    <label for="scoreHashtags">Hashtags (optional)</label>
+                    <input type="text" id="scoreHashtags" placeholder="#viral #marketing #..." maxlength="2000" />
+                </div>
+                <div id="scoreErrorMessage"></div>
+                <div class="button-group">
+                    <button id="runScoreBtn" class="btn-primary">⚡ Score My Post</button>
+                </div>
+            </div>
+            <div id="scoreResultsContainer"></div>
+        </div>
     </main>
 
     <footer>
@@ -287,6 +325,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=eraseimg1"></script>
+    <script src="app.js?v=viralscore1"></script>
 </body>
 </html>
