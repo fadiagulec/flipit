@@ -1987,6 +1987,9 @@ function showSuccess(msg, id) {
         return String(n);
     }
 
+    // Expose so the filter-chips/CSV module appended at the bottom can drive it.
+    window._trendingRenderCards = function(results) { renderCards(results); };
+
     function renderCards(results) {
         container.innerHTML = '';
         if (!results || results.length === 0) {
@@ -2138,7 +2141,18 @@ function showSuccess(msg, id) {
                 throw new Error(data.error || 'Trending fetch failed');
             }
 
-            renderCards(data.results);
+            // Stash for filter-chip re-rendering & CSV export (#4).
+            window._trendingState = window._trendingState || { sort: 'views', window: 'all' };
+            window._trendingState.raw = data.results;
+            window._trendingState.niche = niche;
+            window._trendingState.hashtag = hashtag;
+            const bar = document.getElementById('trendingFilterBar');
+            if (bar) bar.style.display = 'block';
+            if (typeof window._renderTrendingFiltered === 'function') {
+                window._renderTrendingFiltered();
+            } else {
+                renderCards(data.results);
+            }
             recordFlipSuccess();
         } catch (err) {
             container.innerHTML = '';
@@ -2781,4 +2795,374 @@ function showSuccess(msg, id) {
         } catch {}
         return originalFetch.call(this, input, init);
     };
+})();
+
+// ── TRENDING FILTER CHIPS + CSV (#4) ──────────────────────────────
+(function trendingFiltersModule() {
+    const sortChips = document.getElementById('trendingSortChips');
+    const windowChips = document.getElementById('trendingWindowChips');
+    const csvBtn = document.getElementById('trendingCsvBtn');
+    if (!sortChips || !windowChips || !csvBtn) return;
+
+    const SORT_OPTIONS = [
+        { key: 'views',    label: 'Views' },
+        { key: 'likes',    label: 'Likes' },
+        { key: 'comments', label: 'Comments' },
+        { key: 'recent',   label: 'Recent' }
+    ];
+    const WINDOW_OPTIONS = [
+        { key: 'all',  label: 'All Time' },
+        { key: 'week', label: 'Last Week' },
+        { key: 'month', label: 'Last Month' },
+        { key: '3mo',  label: 'Last 3 Months' }
+    ];
+
+    function buildChips(host, options, kind) {
+        host.innerHTML = '';
+        const state = window._trendingState = window._trendingState || { sort: 'views', window: 'all' };
+        options.forEach(opt => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            const active = state[kind] === opt.key;
+            chip.style.cssText = 'padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ' +
+                (active ? '#0d6e66' : '#e0dcd5') +
+                ';background:' + (active ? '#0d6e66' : '#fff') +
+                ';color:' + (active ? '#fff' : '#444') + ';';
+            chip.textContent = opt.label;
+            chip.addEventListener('click', () => {
+                state[kind] = opt.key;
+                window._renderTrendingFiltered();
+                buildChips(sortChips, SORT_OPTIONS, 'sort');
+                buildChips(windowChips, WINDOW_OPTIONS, 'window');
+            });
+            host.appendChild(chip);
+        });
+    }
+
+    function withinWindow(item, windowKey) {
+        if (windowKey === 'all') return true;
+        const ts = item.ts || item.created || item.posted_at || null;
+        if (!ts) return true; // backend doesn't return timestamps reliably — don't filter out everything
+        const ms = typeof ts === 'number' ? (ts < 1e12 ? ts * 1000 : ts) : Date.parse(ts);
+        if (!Number.isFinite(ms)) return true;
+        const now = Date.now();
+        const day = 86400 * 1000;
+        const limits = { week: 7 * day, month: 30 * day, '3mo': 90 * day };
+        return (now - ms) <= (limits[windowKey] || Infinity);
+    }
+
+    function sortFiltered(results) {
+        const state = window._trendingState || { sort: 'views', window: 'all' };
+        const filtered = results.filter(r => withinWindow(r, state.window));
+        const keyMap = { views: 'views', likes: 'likes', comments: 'comments' };
+        if (state.sort === 'recent') {
+            return filtered.slice().sort((a, b) => {
+                const at = Date.parse(a.ts || a.created || 0) || 0;
+                const bt = Date.parse(b.ts || b.created || 0) || 0;
+                return bt - at;
+            });
+        }
+        const field = keyMap[state.sort] || 'views';
+        return filtered.slice().sort((a, b) => (Number(b[field]) || 0) - (Number(a[field]) || 0));
+    }
+
+    window._renderTrendingFiltered = function () {
+        const raw = (window._trendingState && window._trendingState.raw) || [];
+        const sorted = sortFiltered(raw);
+        if (typeof window._trendingRenderCards === 'function') {
+            window._trendingRenderCards(sorted);
+        }
+    };
+
+    csvBtn.addEventListener('click', () => {
+        const raw = (window._trendingState && window._trendingState.raw) || [];
+        const sorted = sortFiltered(raw);
+        if (sorted.length === 0) { alert('Find some trending posts first.'); return; }
+        const cols = ['rank','author','caption','url','views','likes','comments','shares'];
+        const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const lines = [cols.join(',')];
+        sorted.forEach((r, i) => {
+            lines.push([
+                i + 1, r.author || '', r.caption || '', r.url || '',
+                r.views || 0, r.likes || 0, r.comments || 0, r.shares || 0
+            ].map(esc).join(','));
+        });
+        const csv = lines.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const niche = (window._trendingState && (window._trendingState.niche || window._trendingState.hashtag)) || 'flipit';
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'flipit-trending-' + niche + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    });
+
+    buildChips(sortChips, SORT_OPTIONS, 'sort');
+    buildChips(windowChips, WINDOW_OPTIONS, 'window');
+})();
+
+// ── HISTORY (#5) ──────────────────────────────────────────────────
+// Persist every successful flip/score/prompt-batch into localStorage
+// and surface them on a tab. Each entry has { id, kind, title, ts, payload }.
+(function historyModule() {
+    const STORAGE_KEY = 'flipit_history_v1';
+    const CAP = 100;
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+    }
+    function save(list) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, CAP))); } catch {}
+    }
+    function add(entry) {
+        if (!entry || !entry.kind) return;
+        const list = load();
+        list.unshift({
+            id: 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+            ts: Date.now(),
+            ...entry
+        });
+        save(list);
+        if (document.getElementById('history-tab').classList.contains('active')) render();
+    }
+    function remove(id) {
+        save(load().filter(e => e.id !== id));
+        render();
+    }
+    function fmtAgo(ts) {
+        const d = Math.max(0, Date.now() - ts);
+        const s = Math.floor(d / 1000);
+        if (s < 60) return s + 's ago';
+        const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+        const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+        return Math.floor(h / 24) + 'd ago';
+    }
+
+    function restore(entry) {
+        try {
+            if (entry.kind === 'rewrite' && entry.payload) {
+                if (typeof switchTab === 'function') switchTab('script-tab');
+                const ta = document.getElementById('scriptInput');
+                if (ta) { ta.value = entry.payload.original || entry.payload.rewritten || ''; ta.dispatchEvent(new Event('input')); }
+            } else if (entry.kind === 'score' && entry.payload) {
+                if (typeof switchTab === 'function') switchTab('score-tab');
+                const cap = document.getElementById('scoreCaption');
+                const plat = document.getElementById('scorePlatform');
+                const hash = document.getElementById('scoreHashtags');
+                if (cap) cap.value = entry.payload.caption || '';
+                if (plat) plat.value = entry.payload.platform || 'instagram';
+                if (hash) hash.value = entry.payload.hashtags || '';
+            } else if (entry.kind === 'imgprompts' && entry.payload) {
+                if (typeof switchTab === 'function') switchTab('imgprompt-tab');
+                // Just switch to the tab so the user can regenerate — full restore of every input is brittle.
+            }
+        } catch (e) { console.warn('history restore failed:', e); }
+    }
+
+    function render() {
+        const host = document.getElementById('historyResultsContainer');
+        if (!host) return;
+        host.innerHTML = '';
+        const list = load();
+        if (list.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'result-section';
+            empty.innerHTML = '<h3>📭 Nothing here yet</h3><p class="result-text">Run a flip, score a post, or generate prompts — they\'ll show up here.</p>';
+            host.appendChild(empty);
+            return;
+        }
+        const kindIcon = { rewrite: '✍️', score: '⚡', imgprompts: '📸', flip: '🎯' };
+        const kindLabel = { rewrite: 'Script Rewrite', score: 'ViralScore', imgprompts: 'Image Prompts', flip: 'URL Flip' };
+        list.forEach(entry => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border:1px solid #e8e4de;border-radius:12px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;';
+            const left = document.createElement('div');
+            left.style.cssText = 'flex:1;min-width:200px;';
+            const meta = document.createElement('div');
+            meta.style.cssText = 'font-size:12px;color:#888;margin-bottom:4px;';
+            meta.textContent = (kindIcon[entry.kind] || '•') + ' ' + (kindLabel[entry.kind] || entry.kind) + ' · ' + fmtAgo(entry.ts);
+            left.appendChild(meta);
+            const title = document.createElement('div');
+            title.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;line-height:1.4;';
+            title.textContent = entry.title || '(untitled)';
+            left.appendChild(title);
+            if (entry.kind === 'score' && entry.payload && typeof entry.payload.score === 'number') {
+                const sc = document.createElement('div');
+                sc.style.cssText = 'margin-top:4px;font-size:13px;color:#0d6e66;font-weight:700;';
+                sc.textContent = 'Score: ' + entry.payload.score + '/10 — ' + (entry.payload.verdict || '');
+                left.appendChild(sc);
+            }
+            card.appendChild(left);
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;gap:6px;';
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.textContent = '↗ Open';
+            open.style.cssText = 'background:#0d6e66;color:#fff;border:none;padding:8px 12px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+            open.addEventListener('click', () => restore(entry));
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.textContent = '🗑️';
+            del.style.cssText = 'background:#fff;color:#888;border:1px solid #ddd;padding:8px 10px;border-radius:8px;font-size:12px;cursor:pointer;';
+            del.addEventListener('click', () => remove(entry.id));
+            actions.appendChild(open);
+            actions.appendChild(del);
+            card.appendChild(actions);
+            host.appendChild(card);
+        });
+    }
+
+    const clearBtn = document.getElementById('clearHistoryBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            if (!confirm('Delete all history on this device?')) return;
+            save([]);
+            render();
+        });
+    }
+
+    // Re-render when the History tab becomes visible.
+    document.querySelectorAll('[data-tab="history-tab"]').forEach(btn => {
+        btn.addEventListener('click', render);
+    });
+
+    window.FlipItHistory = { add, render };
+    render();
+})();
+
+// Auto-record successful runs in History. Hook into the same fetches we
+// already plumb. Records ONLY successful responses with useful payloads.
+(function historyRecorder() {
+    const HOOKS = {
+        '/.netlify/functions/rewrite-script': async (reqBody, data) => {
+            window.FlipItHistory && window.FlipItHistory.add({
+                kind: 'rewrite',
+                title: (reqBody.script || '').slice(0, 80) || 'Rewrite',
+                payload: { original: reqBody.script, rewritten: data.rewritten, hook: data.hook, cta: data.cta }
+            });
+        },
+        '/.netlify/functions/viral-score': async (reqBody, data) => {
+            window.FlipItHistory && window.FlipItHistory.add({
+                kind: 'score',
+                title: (reqBody.caption || '').slice(0, 80) || 'ViralScore',
+                payload: { caption: reqBody.caption, platform: reqBody.platform, hashtags: reqBody.hashtags, score: data.score, verdict: data.verdict }
+            });
+        },
+        '/.netlify/functions/image-prompts': async (reqBody, data) => {
+            window.FlipItHistory && window.FlipItHistory.add({
+                kind: 'imgprompts',
+                title: (reqBody.flippedScript || reqBody.niche || 'Image prompts').slice(0, 80),
+                payload: { count: Array.isArray(data.prompts) ? data.prompts.length : 0 }
+            });
+        }
+    };
+    const originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const hookKey = Object.keys(HOOKS).find(k => url.includes(k));
+        if (!hookKey || !init || init.method !== 'POST') {
+            return originalFetch.call(this, input, init);
+        }
+        let reqBody = {};
+        try { reqBody = JSON.parse(init.body || '{}'); } catch {}
+        const p = originalFetch.call(this, input, init);
+        // Clone the response so the original handler still gets to read it.
+        p.then(resp => {
+            if (!resp || !resp.ok) return;
+            resp.clone().json().then(data => HOOKS[hookKey](reqBody, data)).catch(() => {});
+        }).catch(() => {});
+        return p;
+    };
+})();
+
+// ── PDF EXPORT (#6) ───────────────────────────────────────────────
+// Adds a "📄 Export PDF" button to the three main result containers
+// after content lands. Uses native window.print() with the @media
+// print stylesheet that hides everything outside .pdf-export-target.
+(function pdfExportModule() {
+    const TARGETS = [
+        { selector: '#scriptResultsContainer', label: 'rewrite' },
+        { selector: '#scoreResultsContainer', label: 'score' },
+        { selector: '#resultsContainer', label: 'flip' }
+    ];
+
+    function ensurePdfButton(container) {
+        if (!container || container.querySelector('.pdf-export-btn')) return;
+        if (!container.querySelector('.result-section')) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pdf-export-btn pdf-hide';
+        btn.textContent = '📄 Export PDF';
+        btn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:8px 14px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;margin:6px 0 12px;';
+        btn.addEventListener('click', () => {
+            container.classList.add('pdf-export-target');
+            const cleanup = () => { container.classList.remove('pdf-export-target'); window.removeEventListener('afterprint', cleanup); };
+            window.addEventListener('afterprint', cleanup);
+            window.print();
+            // Safari sometimes doesn't fire afterprint — clean up on a timer too.
+            setTimeout(cleanup, 8000);
+        });
+        container.insertBefore(btn, container.firstChild);
+    }
+
+    // Watch each target for new children and inject the button.
+    TARGETS.forEach(t => {
+        const c = document.querySelector(t.selector);
+        if (!c) return;
+        const mo = new MutationObserver(() => ensurePdfButton(c));
+        mo.observe(c, { childList: true, subtree: false });
+        ensurePdfButton(c);
+    });
+})();
+
+// ── CLIENT-SIDE ROUTING (#7) ──────────────────────────────────────
+// Tab clicks sync to location.hash so each tab feels like its own page,
+// URLs are shareable, and back/forward buttons work. Zero structural
+// change to the markup — keeps the single-page architecture.
+(function routingModule() {
+    const TAB_TO_HASH = {
+        'url-tab': '#extract',
+        'trending-tab': '#discover',
+        'instagram-tab': '#instagram',
+        'script-tab': '#rewrite',
+        'ideas-tab': '#ideas',
+        'imgprompt-tab': '#image-prompts',
+        'eraser-tab': '#eraser',
+        'score-tab': '#score',
+        'history-tab': '#history'
+    };
+    const HASH_TO_TAB = Object.fromEntries(Object.entries(TAB_TO_HASH).map(([k, v]) => [v, k]));
+
+    function syncHashFromTab() {
+        const active = document.querySelector('.tab-content.active');
+        if (!active) return;
+        const hash = TAB_TO_HASH[active.id];
+        if (hash && location.hash !== hash) {
+            history.replaceState(null, '', hash);
+        }
+    }
+    function applyHash() {
+        const tab = HASH_TO_TAB[location.hash];
+        if (tab && typeof switchTab === 'function') {
+            switchTab(tab);
+        }
+    }
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            const hash = TAB_TO_HASH[tab];
+            if (hash) history.pushState(null, '', hash);
+        });
+    });
+    window.addEventListener('hashchange', applyHash);
+    applyHash();
+    syncHashFromTab();
 })();
