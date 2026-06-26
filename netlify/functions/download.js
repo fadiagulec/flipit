@@ -11,6 +11,23 @@ const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
 
+// Dedupe carousel items by URL — Cobalt and Twitter occasionally return
+// the same asset twice (preview vs full, or duplicate variants). Without
+// this the frontend renders two buttons for the same image and "Download
+// All" saves each file twice. Preserves first-seen order so the user
+// still gets items in their original sequence.
+function dedupeByUrl(items) {
+    const seen = new Set();
+    const out = [];
+    for (const it of items) {
+        if (!it || !it.url) continue;
+        if (seen.has(it.url)) continue;
+        seen.add(it.url);
+        out.push(it);
+    }
+    return out;
+}
+
 exports.handler = __wrapErr( async (event) => {
     const isPro = isProRequest(event);
   // Origin-allowlist CORS — was '*'. download.js is the highest-risk wildcard
@@ -192,11 +209,11 @@ async function tryCobalt(url) {
       };
     }
     if (data.status === 'picker' && data.picker && data.picker.length > 0) {
-      const items = data.picker.map(p => ({
+      const items = dedupeByUrl(data.picker.map(p => ({
         url: p.url,
         type: p.type || (/\.(jpg|png|webp)/i.test(p.url) ? 'image' : 'video'),
         thumb: p.thumb || null
-      }));
+      })));
       return { downloadUrl: items[0].url, carousel: items, filename: data.filename || null, type: items[0].type, mediaCount: items.length };
     }
     return null;
@@ -228,11 +245,12 @@ async function tryTwitter(url) {
           if (m.media_url_https) return { url: m.media_url_https + '?name=large', type: 'image' };
           return null;
         }).filter(Boolean);
-        if (items.length > 1) return { downloadUrl: items[0].url, carousel: items, type: items[0].type, mediaCount: items.length, filename: 'tweet_' + tweetId };
-        if (items.length === 1) return { downloadUrl: items[0].url, type: items[0].type, filename: 'tweet_' + tweetId + (items[0].type === 'video' ? '.mp4' : '.jpg') };
+        const deduped = dedupeByUrl(items);
+        if (deduped.length > 1) return { downloadUrl: deduped[0].url, carousel: deduped, type: deduped[0].type, mediaCount: deduped.length, filename: 'tweet_' + tweetId };
+        if (deduped.length === 1) return { downloadUrl: deduped[0].url, type: deduped[0].type, filename: 'tweet_' + tweetId + (deduped[0].type === 'video' ? '.mp4' : '.jpg') };
       }
       if (data.photos && data.photos.length > 0) {
-        const items = data.photos.map(p => ({ url: p.url + '?name=large', type: 'image' }));
+        const items = dedupeByUrl(data.photos.map(p => ({ url: p.url + '?name=large', type: 'image' })));
         if (items.length === 1) return { downloadUrl: items[0].url, type: 'image', filename: 'tweet_' + tweetId + '.jpg' };
         return { downloadUrl: items[0].url, carousel: items, type: 'image', mediaCount: items.length, filename: 'tweet_' + tweetId };
       }
